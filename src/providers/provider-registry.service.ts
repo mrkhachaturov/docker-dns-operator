@@ -1,0 +1,45 @@
+import { Injectable } from '@nestjs/common';
+import { IDnsProvider } from './dns-provider.interface';
+import { ConsoleLoggerService } from '../logger.service';
+
+@Injectable()
+export class ProviderRegistry {
+  private readonly registry = new Map<string, IDnsProvider>();
+
+  constructor(
+    private readonly providers: IDnsProvider[],
+    private readonly loggerService: ConsoleLoggerService,
+  ) {}
+
+  initialize(): void {
+    for (const provider of this.providers) {
+      if (provider.isConfigured()) {
+        provider.initialize();
+        this.registry.set(provider.providerKey, provider);
+      }
+    }
+    if (this.registry.size === 0) {
+      throw new Error(
+        'ProviderRegistry: No providers configured. Set credentials for at least one provider (CF or MikroTik).',
+      );
+    }
+  }
+
+  getAll(): IDnsProvider[] {
+    return [...this.registry.values()];
+  }
+
+  resolve(keys: string[]): IDnsProvider[] {
+    if (keys.includes('all')) return this.getAll();
+    return keys.flatMap((key) => {
+      const provider = this.registry.get(key);
+      if (!provider) {
+        this.loggerService.warn(
+          `ProviderRegistry: unknown or unconfigured provider '${key}', skipping`,
+        );
+        return [];
+      }
+      return [provider];
+    });
+  }
+}
