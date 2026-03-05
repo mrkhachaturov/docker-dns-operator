@@ -7,12 +7,8 @@ import { IDnsProvider } from '../providers/dns-provider.interface';
 import { IProviderRecord } from '../providers/provider-record.interface';
 import { DnsbaseEntry, DNSTypes } from '../dto/dnsbase-entry';
 import { MikrotikProviderRecord } from './mikrotik-provider-record';
+import { MikrotikFactory } from './mikrotik.factory';
 import { ConsoleLoggerService } from '../logger.service';
-import { secondsToMikrotikTTL } from './mikrotik-ttl';
-import { isDnsAEntry } from '../dto/dnsa-entry';
-import { isDnsCnameEntry } from '../dto/dnscname-entry';
-import { isDnsMxEntry } from '../dto/dnsmx-entry';
-import { isDnsNsEntry } from '../dto/dnsns-entry';
 import { NestedError } from '../errors/nested-error';
 
 @Injectable()
@@ -35,6 +31,7 @@ export class MikrotikService implements IDnsProvider {
   constructor(
     private configService: ConfigService,
     private loggerService: ConsoleLoggerService,
+    private factory: MikrotikFactory = new MikrotikFactory(),
   ) {}
 
   isConfigured(): boolean {
@@ -66,28 +63,17 @@ export class MikrotikService implements IDnsProvider {
   }
 
   async createEntry(entry: DnsbaseEntry): Promise<void> {
-    const body = this.buildBody(entry);
-    body.comment = this.entryIdentifier;
-    body.ttl = secondsToMikrotikTTL(this.defaultTTL);
+    const body = this.factory.toCreateBody(entry, this.entryIdentifier, this.defaultTTL);
     await this.doRequest('PUT', `${this.baseUrl}/rest/ip/dns/static`, body);
   }
 
   async updateEntry(oldRecord: IProviderRecord, desired: DnsbaseEntry): Promise<void> {
-    const body = this.buildBody(desired);
+    const body = this.factory.toUpdateBody(desired);
     await this.doRequest('PATCH', `${this.baseUrl}/rest/ip/dns/static/${oldRecord.id}`, body);
   }
 
   async deleteEntry(oldRecord: IProviderRecord): Promise<void> {
     await this.doRequest('DELETE', `${this.baseUrl}/rest/ip/dns/static/${oldRecord.id}`);
-  }
-
-  private buildBody(entry: DnsbaseEntry): Record<string, unknown> {
-    const base: Record<string, unknown> = { name: entry.name, type: entry.type };
-    if (isDnsAEntry(entry)) { return { ...base, address: entry.address }; }
-    if (isDnsCnameEntry(entry)) { return { ...base, cname: entry.target }; }
-    if (isDnsMxEntry(entry)) { return { ...base, 'mx-exchange': entry.server, 'mx-preference': String(entry.priority) }; }
-    if (isDnsNsEntry(entry)) { return { ...base, ns: entry.server }; }
-    throw new Error(`MikrotikService: unsupported entry type ${entry.type}`);
   }
 
   private mapRecord(raw: Record<string, unknown>): MikrotikProviderRecord {
