@@ -2,7 +2,7 @@ import { Injectable, LoggerService } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { isNumber } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
-import { CloudFlareService } from './cloud-flare/cloud-flare.service';
+import { ProviderRegistry } from './providers/provider-registry.service';
 import { DockerService } from './docker/docker.service';
 import { computeSetDifference } from './app.functions';
 import { DnsbaseEntry } from './dto/dnsbase-entry';
@@ -25,7 +25,7 @@ export enum State {
 
 /**
  * Behaviors to initialize the applications services and execute the synchronization between
- * the docker labels and CloudFlare.
+ * the docker labels and all configured DNS providers.
  */
 @LogDecorator()
 @Injectable()
@@ -56,7 +56,7 @@ export class AppService extends CronService {
   }
 
   constructor(
-    private cloudFlareService: CloudFlareService,
+    private providerRegistry: ProviderRegistry,
     private dockerService: DockerService,
     private configService: ConfigService,
     private ddnsService: DdnsService,
@@ -68,19 +68,20 @@ export class AppService extends CronService {
 
   /**
    * Initialize AppService.
-   * Initializes CloudFlare and Docker services
+   * Initializes the provider registry and Docker service.
    */
   initialize() {
-    this.cloudFlareService.initialize();
+    if (this.state === State.Initialized)
+      throw Error('AppService, initialize: Already initialized, but attempted to initialize again');
+
+    this.providerRegistry.initialize();
     this.dockerService.initialize();
     this.state = State.Initialized;
   }
 
   /**
    * Fetches labels from docker.
-   * Fetches records from CloudFlare.
-   * Computes additions, updates, deletions and unchanged.
-   * Adds, Updates and Deletes entries from CloudFlare.
+   * For each provider: fetches records, computes diff, applies changes.
    */
   @LogDecorator({ level: 'debug' })
   async job() {
@@ -89,18 +90,11 @@ export class AppService extends CronService {
         'AppService, synchronize: Not initialized, cannot synchronize. Call initialize first',
       );
 
-    // Prepare CloudFlare: fetch and cache zones
-    await this.cloudFlareService.prepareForJob!();
-
-    // Fetch all current CloudFlare records
-    const cloudFlareEntries = await this.cloudFlareService.getRecords!();
-
-    // Get docker containers and extract DNS entries
     const containers = await this.dockerService.getContainers();
-    let dockerEntries = await this.dockerService.extractDNSEntries(containers);
+    let allDockerEntries = await this.dockerService.extractDNSEntries(containers);
 
-    // Determine if DDNS is required
-    if (this.ddnsService.isDdnsRequired(dockerEntries)) {
+    // DDNS resolution — provider-agnostic, applied before per-provider filtering
+    if (this.ddnsService.isDdnsRequired(allDockerEntries)) {
       if (this.ddnsService.getState() === CronState.Stopped)
         await this.ddnsService.start();
       const address = this.ddnsService.getIPAddress();
@@ -108,11 +102,11 @@ export class AppService extends CronService {
         this.loggerService
           .warn(`DDNS, IPAddress has yet to be fetched successfully. DDNS records have been filtered out.
           They'll be added in automatically once an IPAddress has been fetched.`);
-        dockerEntries = dockerEntries.filter(
+        allDockerEntries = allDockerEntries.filter(
           (entry) => !(isDnsAEntry(entry) && entry.address === 'DDNS'),
         );
       } else {
-        dockerEntries = dockerEntries.map((entry) => {
+        allDockerEntries = allDockerEntries.map((entry) => {
           if (!isDnsAEntry(entry)) return entry;
           if (entry.address !== 'DDNS') return entry;
           return plainToInstance(DnsaEntry, { ...entry, address });
@@ -121,25 +115,68 @@ export class AppService extends CronService {
     } else if (this.ddnsService.getState() === CronState.Started)
       await this.ddnsService.stop();
 
-    // Compute set differences
-    const setDifference = computeSetDifference(dockerEntries, cloudFlareEntries);
-
-    // Apply changes
-    const requests = [
-      ...setDifference.add.map((entry) =>
-        this.cloudFlareService.createEntry(entry),
-      ),
-      ...setDifference.update.map(({ old, update }) =>
-        this.cloudFlareService.updateEntry(old, update),
-      ),
-      ...setDifference.delete.map((entry) =>
-        this.cloudFlareService.deleteEntry(entry),
-      ),
-    ];
-    await Promise.all(requests);
-
-    this.loggerService.log(
-      `Synchronisation complete, entries changed: Added ${setDifference.add.length}, Updated ${setDifference.update.length}, Deleted ${setDifference.delete.length}, Unchanged ${setDifference.unchanged.length}`,
+    // Warn once (before the per-provider loop) for any unknown/unconfigured provider
+    // keys referenced across ALL entries.
+    const allReferencedKeys = new Set(
+      allDockerEntries.flatMap((e) => e.providers ?? ['cf']),
     );
+    allReferencedKeys.delete('all'); // 'all' is a special token, not a provider key
+    this.providerRegistry.resolve([...allReferencedKeys]); // emits warnings as side-effect
+
+    for (const provider of this.providerRegistry.getAll()) {
+      // Prepare (e.g., CF fetches zone list)
+      if (provider.prepareForJob) await provider.prepareForJob();
+
+      // Filter entries targeting this provider
+      const targeted = allDockerEntries.filter(
+        (e) => (e.providers ?? ['cf']).includes(provider.providerKey) ||
+                (e.providers ?? ['cf']).includes('all'),
+      );
+
+      // Per-provider deduplication
+      const deduplicated = this.dedupeForProvider(targeted, provider.providerKey);
+
+      // Fetch current state from provider
+      const providerRecords = await provider.getRecords();
+
+      // Compute diff
+      const diff = computeSetDifference(deduplicated, providerRecords);
+
+      // Apply diff
+      await Promise.all([
+        ...diff.add.map((e) => provider.createEntry(e)),
+        ...diff.update.map(({ old, update }) => provider.updateEntry(old, update)),
+        ...diff.delete.map((e) => provider.deleteEntry(e)),
+      ]);
+
+      this.loggerService.log(
+        `[${provider.providerKey}] Synchronisation complete: Added ${diff.add.length}, Updated ${diff.update.length}, Deleted ${diff.delete.length}, Unchanged ${diff.unchanged.length}`,
+      );
+    }
+  }
+
+  private dedupeForProvider(entries: DnsbaseEntry[], providerKey: string): DnsbaseEntry[] {
+    const seen = new Map<string, DnsbaseEntry>();
+    const dupes = new Map<string, DnsbaseEntry[]>();
+
+    for (const entry of entries) {
+      const key = `${providerKey}:${entry.type}:${entry.name}`;
+      if (dupes.has(key)) {
+        dupes.get(key)!.push(entry);
+      } else if (seen.has(key)) {
+        dupes.set(key, [seen.get(key)!, entry]);
+        seen.delete(key);
+      } else {
+        seen.set(key, entry);
+      }
+    }
+
+    dupes.forEach((_dupEntries, key) => {
+      this.loggerService.warn(
+        `AppService, deduplication: entries share duplicate key '${key}' for provider '${providerKey}', all will be ignored`,
+      );
+    });
+
+    return [...seen.values()];
   }
 }
