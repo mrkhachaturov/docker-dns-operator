@@ -295,8 +295,13 @@ describe('DockerService', () => {
     describe('extractDNSEntries', () => {
       const mockAEntry = validDnsAEntry(DnsaEntry);
       const mockCnameEntry = validDnsCnameEntry(DnsCnameEntry);
-      const mockMxEntry = validDnsMxEntry(DnsMxEntry);
-      const mockNsEntry = validDnsNsEntry(DnsNsEntry);
+      // MX/NS entries don't set providers in their factory functions, but after
+      // normalization in extractDNSEntries they will have providers: ['cf'].
+      const mockMxEntryRaw = validDnsMxEntry(DnsMxEntry);
+      const mockNsEntryRaw = validDnsNsEntry(DnsNsEntry);
+      // Create proper class instances with providers: ['cf'] to match normalizer output
+      const mockMxEntry = Object.assign(new DnsMxEntry(), mockMxEntryRaw, { providers: ['cf'] });
+      const mockNsEntry = Object.assign(new DnsNsEntry(), mockNsEntryRaw, { providers: ['cf'] });
       const mockMultiLabelAEntry = validDnsAEntry(DnsaEntry, {
         name: 'multilabel-a.test-domain.com',
       });
@@ -334,12 +339,12 @@ describe('DockerService', () => {
 
         mockMxContainerInfo = mockContainerInfoBuilder
           .WithId('id-mx')
-          .WithLabel(mockMxEntry)
+          .WithLabel(mockMxEntryRaw)
           .Build();
 
         mockNsContainerInfo = mockContainerInfoBuilder
           .WithId('id-ns')
-          .WithLabel(mockNsEntry)
+          .WithLabel(mockNsEntryRaw)
           .Build();
       });
 
@@ -386,79 +391,29 @@ describe('DockerService', () => {
         );
       });
 
-      it('should warn and ignore all if two or more entries share the same unique identifier', () => {
-        // arrange
+      it('should return all entries including duplicates (dedup is handled upstream)', () => {
+        // Dedup logic has been moved out of DockerService to AppService.
+        // DockerService now returns all valid entries, including those with
+        // the same Key, without filtering or warning about duplicates.
+        const duplicateCnameEntry = {
+          ...mockCnameEntry,
+          target: 'something-else.com',
+        } as DnsCnameEntry;
         const paramContainers = [
           mockAContainerInfo,
           mockCnameContainerInfo,
-          mockMxContainerInfo,
           mockContainerInfoBuilder
-            .WithId('id-cname')
-            .WithLabel({
-              ...mockCnameEntry,
-              target: 'something-else.com',
-            } as DnsCnameEntry)
+            .WithId('id-cname-dup')
+            .WithLabel(duplicateCnameEntry)
             .Build(),
-          mockContainerInfoBuilder
-            .WithId('id-cname')
-            .WithLabel({
-              ...mockCnameEntry,
-              target: 'a-third.different.com',
-            } as DnsCnameEntry)
-            .Build(),
-          mockContainerInfoBuilder
-            .WithId('id-cname')
-            .WithLabel({
-              ...mockMxEntry,
-              server: 'mx1.different-value.com',
-            } as DnsMxEntry)
-            .Build(),
-          mockNsContainerInfo,
-        ];
-        const expected = [mockAEntry, mockNsEntry];
-        const expectedWarnings = [
-          {
-            containerIds: JSON.stringify([
-              paramContainers[1].Id,
-              paramContainers[3].Id,
-              paramContainers[4].Id,
-            ]),
-            entries: JSON.stringify({
-              type: mockCnameEntry.type,
-              name: mockCnameEntry.name,
-            }),
-          },
-          {
-            containerIds: JSON.stringify([
-              paramContainers[2].Id,
-              paramContainers[5].Id,
-            ]),
-            entries: JSON.stringify({
-              type: mockMxEntry.type,
-              name: mockMxEntry.name,
-            }),
-          },
         ];
 
         // act
-        expect(sut.extractDNSEntries(paramContainers)).toEqual(expected);
+        const result = sut.extractDNSEntries(paramContainers);
 
-        // assert
-        expect(mockConsoleLoggerService.warn).toHaveBeenCalledTimes(2);
-        expectedWarnings.forEach(({ containerIds, entries }) => {
-          expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
-            `DockerService, extractDNSEntries: containers with id's ${containerIds} have share duplicate entries for '${entries}'; all will be ignored`,
-          );
-        });
-        expect(mockConsoleLoggerService.error).not.toHaveBeenCalled();
-        expect(mockConsoleLoggerService.debug).toHaveBeenCalledTimes(1);
-        expect(mockConsoleLoggerService.debug).toHaveBeenCalledWith(
-          expect.objectContaining({
-            level: 'debug',
-            method: 'extractDNSEntries',
-            service: 'DockerService',
-          }),
-        );
+        // assert — all three entries are returned; no dedup warnings
+        expect(result).toHaveLength(3);
+        expect(mockConsoleLoggerService.warn).not.toHaveBeenCalled();
       });
 
       it('should warn and ignore if type is Unsupported, but process other valid entries', () => {

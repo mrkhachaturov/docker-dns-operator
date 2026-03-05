@@ -14,6 +14,7 @@ import { DockerFactory } from './docker.factory';
 import { DnsaEntry } from '../dto/dnsa-entry';
 import { DnsBaseCloudflareEntry } from '../dto/dnsbase-entry.spec';
 import { getLogClassDecorator } from '../utility.functions';
+import { normalizeProviders, normalizeProviderOptions } from './label-normalizer';
 
 let loggerPointer: LoggerService;
 const LogDecorator = getLogClassDecorator(() => loggerPointer);
@@ -121,12 +122,7 @@ export class DockerService {
         'DockerService, extractDNSEntries: not initialized, must call initialize',
       );
 
-    const results: {
-      [key: string]: { dns: DnsbaseEntry; container: Docker.ContainerInfo };
-    } = {};
-    const duplicates: {
-      [key: string]: { dns: DnsbaseEntry; container: Docker.ContainerInfo }[];
-    } = {};
+    const allEntries: DnsbaseEntry[] = [];
     containers.forEach((current) => {
       try {
         // try to parse the JSON
@@ -152,20 +148,60 @@ export class DockerService {
             );
             return;
           }
+
+          const rawEntry = entry as Record<string, unknown>;
+
+          // Normalize providers
+          const providers = normalizeProviders(rawEntry.provider, rawEntry.providers);
+          if (providers === null) {
+            this.loggerService.warn(
+              `DockerService, extractDNSEntries: container ${current.Id} has malformed providers field, entry skipped`,
+            );
+            return;
+          }
+
+          // Normalize providerOptions (null = malformed, skip entry)
+          const providerOptions = normalizeProviderOptions(rawEntry);
+          if (providerOptions === null) {
+            this.loggerService.warn(
+              `DockerService, extractDNSEntries: container ${current.Id} has malformed proxy field, entry skipped`,
+            );
+            return;
+          }
+
+          // Strip raw proxy/provider fields before instantiation
+          const { proxy, provider, providers: _p, providerOptions: _po, ...restEntry } = rawEntry;
+
           // Cast to appropriate type
           let instance: DnsbaseEntry;
           switch (entry.type) {
             case DNSTypes.A:
-              instance = plainToInstance(DnsaEntry, entry);
+              instance = plainToInstance(DnsaEntry, {
+                ...restEntry,
+                providers,
+                ...(providerOptions ? { providerOptions } : {}),
+              });
               break;
             case DNSTypes.CNAME:
-              instance = plainToInstance(DnsCnameEntry, entry);
+              instance = plainToInstance(DnsCnameEntry, {
+                ...restEntry,
+                providers,
+                ...(providerOptions ? { providerOptions } : {}),
+              });
               break;
             case DNSTypes.MX:
-              instance = plainToInstance(DnsMxEntry, entry);
+              instance = plainToInstance(DnsMxEntry, {
+                ...restEntry,
+                providers,
+                ...(providerOptions ? { providerOptions } : {}),
+              });
               break;
             case DNSTypes.NS:
-              instance = plainToInstance(DnsNsEntry, entry);
+              instance = plainToInstance(DnsNsEntry, {
+                ...restEntry,
+                providers,
+                ...(providerOptions ? { providerOptions } : {}),
+              });
               break;
             case DNSTypes.Unsupported:
               this.loggerService.warn(
@@ -188,27 +224,7 @@ export class DockerService {
             );
             return;
           }
-          if (duplicates[instance.Key] !== undefined)
-            // if a duplication has already been detected
-            // add to suplicates list
-            duplicates[instance.Key].push({
-              dns: instance,
-              container: current,
-            });
-          else if (results[instance.Key] === undefined)
-            // no duplication and no result registered
-            // add to results list
-            results[instance.Key] = { dns: instance, container: current };
-          else {
-            // duplicate detected.
-            // no duplicate previously detected.
-            // remove from results and add both to duplicate list.
-            duplicates[instance.Key] = [
-              results[instance.Key],
-              { dns: instance, container: current },
-            ];
-            delete results[instance.Key];
-          }
+          allEntries.push(instance);
         });
       } catch (error) {
         // failed to parse the JSON
@@ -217,20 +233,7 @@ export class DockerService {
         );
       }
     });
-    // iterate duplicates to warn
-    Object.entries(duplicates).forEach(([, entries]) => {
-      const containerIds = JSON.stringify(
-        entries.map((entry) => entry.container.Id),
-      );
-      const conflictingIdentity = JSON.stringify({
-        type: entries[0].dns.type,
-        name: entries[0].dns.name,
-      });
-      this.loggerService.warn(
-        `DockerService, extractDNSEntries: containers with id's ${containerIds} have share duplicate entries for '${conflictingIdentity}'; all will be ignored`,
-      );
-    });
 
-    return Object.values(results).map((entry) => entry.dns);
+    return allEntries;
   }
 }
