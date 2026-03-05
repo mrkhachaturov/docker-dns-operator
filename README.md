@@ -26,7 +26,9 @@ This project does the following:
 - Reads labels from containers sharing the same docker runtime.<br/>
   The labels contain DNS information.
 - Optionally include stopped containers DNS entires
-- Synchronises those records to CloudFlare
+- Synchronises those records to configured DNS providers
+  - CloudFlare
+  - MikroTik
 - Runs at a regular interval (like a CRON job but interval is only programmable in seconds)
 - Supports DDNS (ipv4 only)
 - Supports multiple instances with different configurations
@@ -37,13 +39,13 @@ This project does the following:
   - MX
   - NS
 
-**IMPORTANT** Only CloudFlare is supported.
+**IMPORTANT** This project now supports multiple providers. At least one provider must be configured.
 
 # User guide
 
 ## TL;DR
 
-The project provides a Docker Compose external DNS container specifically for CloudFlare. It supports DNS entries of types A, CNAME, NS, and MX. Configuration is managed through environment variables and labels applied to Docker containers. Detailed examples for various configurations and DNS record types are provided in the [Examples](#examples) section. For more details on DNS record types, refer to the [DNS Entry Types](#dns-entry-types) section.
+The project provides a Docker Compose external DNS container with provider-based routing. It currently supports CloudFlare and MikroTik, with DNS entry types A, CNAME, NS, and MX. Configuration is managed through environment variables and labels applied to Docker containers. Detailed examples for various configurations and DNS record types are provided in the [Examples](#examples) section. For more details on DNS record types, refer to the [DNS Entry Types](#dns-entry-types) section.
 
 ## Troubleshooting
 
@@ -74,18 +76,23 @@ Detailed examples are available in the [Examples](#examples) section.
 
 | Variable Name                    | Default Value               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | -------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PROJECT_LABEL                    | docker-compose-external-dns | Detailed example available in the [project Label and Instance ID section](#project_label-and-instance_id) section.<br/><br/>Forms part of the label the project looks for on Docker containers to interpret as DNS entries. Also written as a comment to Cloudflare DNS entries managed by this instance of the project.                                                                                                                                    |
-| INSTANCE_ID                      | 1                           | Detailed example available in the [project Label and Instance ID section](#project_label-and-instance_id) section.<br/><br/>Forms part of the label the project looks for on Docker containers to interpret as DNS entries. Also written as a comment to Cloudflare DNS entries managed by this instance of the project.                                                                                                                                    |
+| PROJECT_LABEL                    | docker-compose-external-dns | Detailed example available in the [project Label and Instance ID section](#project_label-and-instance_id) section.<br/><br/>Forms part of the label the project looks for on Docker containers to interpret as DNS entries. Also written as an ownership comment for managed provider records.                                                                                                                                                            |
+| INSTANCE_ID                      | 1                           | Detailed example available in the [project Label and Instance ID section](#project_label-and-instance_id) section.<br/><br/>Forms part of the label the project looks for on Docker containers to interpret as DNS entries. Also written as an ownership comment for managed provider records.                                                                                                                                                            |
 | EXECUTION_FREQUENCY_SECONDS      | 60                          | How frequently the CRON job should execute to detect changes. Default is every 60 seconds. Undefined or empty uses the default. Minimum is every 1 second. There is no maximum. This must be an integer.                                                                                                                                                                                                                                                    |
 | DDNS_EXECUTION_FREQUENCY_MINUTES | 60                          | Determines how frequently the DDNS Service checks for a new public IP address. This setting only applies if you're using DDNS otherwise the service will not be started.                                                                                                                                                                                                                                                                                    |
 | PRESERVE_STOPPED                 | false                       | Determines if DNS entries for stopped containers are synchronised to the DNS server. `false` doesn't synchronise, meaning containers which are stopped will have their DNS entries removed. `true` means stopped containers won't have their entries removed. Removed containers will always have their DNS entries removed.                                                                                                                                |
-| API_TOKEN                        |                             | You must supply either API_TOKEN or API_TOKEN_FILE but not both.<br/><br/>Your API token from Cloudflare. Must be granted Zone.Zone read and Zone.DNS edit.<br/><br/><span style="color: red; font-weight:bold">IMPORTANT</span> Use of this property is insecure as your API_TOKEN will be in plain text. It is recommended you use API_TOKEN_FILE. Use at your own risk.                                                                                  |
-| API_TOKEN_FILE                   |                             | You must supply either API_TOKEN or API_TOKEN_FILE but not both.<br/><br/>Secure way to share your Cloudflare API Token with the project. Recommended approach for Docker Swarm. Compatible with Docker Compose (but less secure).<br/><br/>Read Docker Compose docs for more information: [Docker Compose Secrets](https://docs.docker.com/compose/use-secrets/)                                                                                           |
+| API_TOKEN                        |                             | Optional. CloudFlare provider is enabled when API_TOKEN or API_TOKEN_FILE is set.<br/><br/>Your API token from Cloudflare. Must be granted Zone.Zone read and Zone.DNS edit.<br/><br/><span style="color: red; font-weight:bold">IMPORTANT</span> Use of this property is insecure as your API_TOKEN will be in plain text. It is recommended you use API_TOKEN_FILE. Use at your own risk.                                                                |
+| API_TOKEN_FILE                   |                             | Optional. CloudFlare provider is enabled when API_TOKEN or API_TOKEN_FILE is set.<br/><br/>Secure way to share your Cloudflare API Token with the project. Recommended approach for Docker Swarm. Compatible with Docker Compose (but less secure).<br/><br/>Read Docker Compose docs for more information: [Docker Compose Secrets](https://docs.docker.com/compose/use-secrets/)                                                                         |
+| MIKROTIK_BASEURL                 |                             | Optional. MikroTik provider is enabled when MIKROTIK_BASEURL, MIKROTIK_USERNAME and MIKROTIK_PASSWORD are all set.<br/><br/>Base URL of RouterOS REST API endpoint, for example: https://192.168.1.1                                                                                                                                                                                     |
+| MIKROTIK_USERNAME                |                             | Optional. MikroTik username. Required together with MIKROTIK_BASEURL and MIKROTIK_PASSWORD to enable MikroTik provider.                                                                                                                                                                                                                                                                     |
+| MIKROTIK_PASSWORD                |                             | Optional. MikroTik password. Required together with MIKROTIK_BASEURL and MIKROTIK_USERNAME to enable MikroTik provider.                                                                                                                                                                                                                                                                     |
+| MIKROTIK_SKIP_TLS_VERIFY         | false                       | Optional. If true, TLS certificate verification is disabled for MikroTik REST requests. Use only in trusted environments.                                                                                                                                                                                                                                                                   |
+| MIKROTIK_DEFAULT_TTL             | 3600                        | Optional. Default TTL in seconds for MikroTik-created records.                                                                                                                                                                                                                                                                                                                              |
 | LOG_LEVEL                        | error                       | The current logging level. The default is error, meaning only errors and fatal get logged.<br/><br/>Each level includes the levels above it from most specific to least specific. By way of example, verbose will output everything. debug will ignore verbose. log will ignore debug and verbose.<br/><br/>From most specific to least:</br>fatal<br/>error<br/>warn<br/>log<br/>debug<br/>verbose<br/><br/>These log levels come from the NestJS project. |
 
 #### PROJECT_LABEL and INSTANCE_ID
 
-These two items combine to form the label which the project will look for on Docker Containers and write as the comment for that DNS entry into Cloudflare.
+These two items combine to form the label which the project will look for on Docker Containers and write as an ownership comment for managed DNS records.
 
 It is interpolated as follows: `${PROJECT_ID}:${INSTANCE_ID}`<br/><br/>
 For example:
@@ -106,6 +113,28 @@ The values of the Docker Compose labels correspond to DNS entries. You can find 
 Examples for all of these can be found in the [Examples](#examples) section below.
 For more details on the DNS record types, refer to the [DNS Entry Types](#dns-entry-types) section.
 
+#### Provider Routing
+
+Each DNS entry can target one or more providers.
+
+- `providers` (preferred): array or string, such as `["cf"]`, `["mikrotik"]`, `["cf","mikrotik"]`, or `"all"`
+- `provider` (legacy singular): accepted and normalized to `providers`
+- If provider fields are omitted, the entry defaults to `["cf"]` for backward compatibility
+
+Provider-specific options:
+
+- CloudFlare proxy can be set as legacy top-level `proxy` or explicit `providerOptions.cf.proxy`
+- `proxy` applies to CloudFlare A/CNAME records; it is ignored by MikroTik
+
+Example:
+
+```yaml
+labels:
+  - 'docker-compose-external-dns:1=[
+    { "type": "A", "name": "public.example.com", "address": "1.2.3.4", "providers": ["cf","mikrotik"], "providerOptions": { "cf": { "proxy": true } } },
+    { "type": "A", "name": "internal.example.com", "address": "192.168.1.10", "providers": ["mikrotik"] }]'
+```
+
 #### A
 
 The A record points a domain name to an IP address.  
@@ -121,7 +150,7 @@ The properties required for this entry are as follows:
 | type     | A                                             | The type of the record. In this case it should be A                                                                                                                                                                                                              |
 | name     | \<your domain name\>                          | This is the domain you want this A record to resolve for. For example: example-domain.com                                                                                                                                                                        |
 | address  | \<your server's address (v4 or 6)\> OR "DDNS" | The address you want your domain name to resolve to.</br> Or the string literal "DDNS" which instructs the project to compute your current public ipv4 address and use it for this record.                                                                       |
-| proxy    | true or false                                 | True uses Cloudflare's proxy to hide your address. False causes Cloudflare to act as a normal DNS server.<br/><br/>Documentation: [Proxied DNS Records](https://developers.cloudflare.com/dns/manage-dns-records/reference/proxied-dns-records/#proxied-records) |
+| proxy    | true or false                                 | Optional, CloudFlare only. True uses Cloudflare's proxy to hide your address. False causes Cloudflare to act as a normal DNS server.<br/><br/>Documentation: [Proxied DNS Records](https://developers.cloudflare.com/dns/manage-dns-records/reference/proxied-dns-records/#proxied-records) |
 
 #### CNAME
 
@@ -150,7 +179,7 @@ The properties required for this entry are as follows:
 | type     | CNAME                                  | The type of the record. In this case it should be CNAME                                                                                                                                                                                                                                                                                                                                                                                                       |
 | name     | \<your alias\>                         | This is the alias you want this CNAME record to resolve for. For example: subdomain.example-domain.com                                                                                                                                                                                                                                                                                                                                                        |
 | target   | \<your full A record or CNAME record\> | The full name of the relevant A or CNAME record this should resolve to. For example, use 'example-domain.com' to point at the A record above.                                                                                                                                                                                                                                                                                                                 |
-| proxy    | true or false                          | True uses Cloudflare's proxy to hide your address. False causes Cloudflare to act as a normal DNS server.<br/><br/>Documentation: [Proxied DNS Records](https://developers.cloudflare.com/dns/manage-dns-records/reference/proxied-dns-records/#proxied-records)<br/><br/>Please note, only one level of subdomain can be proxied. If it's two subdomains deep (e.g. test.subdomain.example.com) it cannot be proxied unless you have a premium subscription. |
+| proxy    | true or false                          | Optional, CloudFlare only. True uses Cloudflare's proxy to hide your address. False causes Cloudflare to act as a normal DNS server.<br/><br/>Documentation: [Proxied DNS Records](https://developers.cloudflare.com/dns/manage-dns-records/reference/proxied-dns-records/#proxied-records)<br/><br/>Please note, only one level of subdomain can be proxied. If it's two subdomains deep (e.g. test.subdomain.example.com) it cannot be proxied unless you have a premium subscription. |
 
 #### MX
 
