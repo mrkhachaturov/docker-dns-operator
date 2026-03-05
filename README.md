@@ -620,3 +620,139 @@ services:
         { "type": "CNAME", "name": "ns1.lan.my-domain.com", "target": "lan.my-domain.com", "proxy": false },
         { "type": "NS", "name": "lan.my-domain.com", "server": "ns1.lan.my-domain.com" }]'
 ```
+
+### MikroTik
+
+#### Minimal configuration
+
+This example shows the simplest MikroTik-only setup. The MikroTik REST API runs on the same port as the web interface (`www` — port 80, or `www-ssl` — port 443).
+
+```yaml
+services:
+  docker-compose-external-dns:
+    image: 'timk153/docker-external-dns:latest'
+    environment:
+      - MIKROTIK_BASEURL=http://192.168.1.1
+      - MIKROTIK_USERNAME=<your username>
+      - MIKROTIK_PASSWORD=<your password>
+    volumes:
+      - '/var/run/docker.sock:/var/run/docker.sock:ro'
+
+  other-service:
+    image: 'busybox:latest'
+    command: 'sleep 3600'
+    labels:
+      - 'docker-compose-external-dns:1=[
+          { "type": "A", "name": "myservice.lan", "address": "192.168.1.50", "providers": ["mikrotik"] }]'
+```
+
+Explanation: Connects to the MikroTik REST API at `http://192.168.1.1` (port 80). The `providers` field routes the entry to MikroTik. Managed records are tagged with an ownership comment (`docker-compose-external-dns:1`) so the service only modifies records it created.
+
+#### Self-signed TLS certificate
+
+If your MikroTik uses HTTPS with a self-signed certificate (common in home labs), set `MIKROTIK_SKIP_TLS_VERIFY=true`.
+
+<span style="color: red; font-weight: bold;">WARNING</span> Only use `MIKROTIK_SKIP_TLS_VERIFY=true` in trusted private networks. It disables TLS certificate validation.
+
+```yaml
+services:
+  docker-compose-external-dns:
+    image: 'timk153/docker-external-dns:latest'
+    environment:
+      - MIKROTIK_BASEURL=https://192.168.1.1
+      - MIKROTIK_USERNAME=<your username>
+      - MIKROTIK_PASSWORD=<your password>
+      - MIKROTIK_SKIP_TLS_VERIFY=true
+    volumes:
+      - '/var/run/docker.sock:/var/run/docker.sock:ro'
+
+  other-service:
+    image: 'busybox:latest'
+    command: 'sleep 3600'
+    labels:
+      - 'docker-compose-external-dns:1=[
+          { "type": "A", "name": "myservice.lan", "address": "192.168.1.50", "providers": ["mikrotik"] }]'
+```
+
+#### Custom TTL
+
+Use `MIKROTIK_DEFAULT_TTL` to control the TTL (in seconds) applied to newly created records. Default is `3600` (1 hour).
+
+```yaml
+services:
+  docker-compose-external-dns:
+    image: 'timk153/docker-external-dns:latest'
+    environment:
+      - MIKROTIK_BASEURL=http://192.168.1.1
+      - MIKROTIK_USERNAME=<your username>
+      - MIKROTIK_PASSWORD=<your password>
+      - MIKROTIK_DEFAULT_TTL=300
+    volumes:
+      - '/var/run/docker.sock:/var/run/docker.sock:ro'
+
+  other-service:
+    image: 'busybox:latest'
+    command: 'sleep 3600'
+    labels:
+      - 'docker-compose-external-dns:1=[
+          { "type": "A", "name": "myservice.lan", "address": "192.168.1.50", "providers": ["mikrotik"] }]'
+```
+
+### Multi-provider (CloudFlare + MikroTik)
+
+These examples show how to run both providers simultaneously. Each DNS entry declares which provider(s) it targets via the `providers` field.
+
+#### Split routing — public to CloudFlare, internal to MikroTik
+
+A common homelab pattern: public-facing records go to CloudFlare, internal LAN records go to MikroTik.
+
+<span style="color: red; font-weight: bold;">IMPORTANT</span> example uses insecure option "API_TOKEN" for simplicity.
+
+```yaml
+services:
+  docker-compose-external-dns:
+    image: 'timk153/docker-external-dns:latest'
+    environment:
+      - API_TOKEN=<your cloudflare api token>
+      - MIKROTIK_BASEURL=http://192.168.1.1
+      - MIKROTIK_USERNAME=<your username>
+      - MIKROTIK_PASSWORD=<your password>
+    volumes:
+      - '/var/run/docker.sock:/var/run/docker.sock:ro'
+
+  my-service:
+    image: 'busybox:latest'
+    command: 'sleep 3600'
+    labels:
+      - 'docker-compose-external-dns:1=[
+          { "type": "A", "name": "myservice.my-domain.com", "address": "1.2.3.4",       "providers": ["cf"],        "providerOptions": { "cf": { "proxy": true } } },
+          { "type": "A", "name": "myservice.lan",           "address": "192.168.1.50",  "providers": ["mikrotik"] }]'
+```
+
+Explanation: `myservice.my-domain.com` is published to CloudFlare with proxying enabled. `myservice.lan` is created as an internal A record on MikroTik. Each record only goes to its designated provider.
+
+#### Same record to both providers
+
+Use `"providers": ["cf", "mikrotik"]` (or the shorthand `"providers": "all"`) to push a record to every configured provider.
+
+```yaml
+services:
+  docker-compose-external-dns:
+    image: 'timk153/docker-external-dns:latest'
+    environment:
+      - API_TOKEN=<your cloudflare api token>
+      - MIKROTIK_BASEURL=http://192.168.1.1
+      - MIKROTIK_USERNAME=<your username>
+      - MIKROTIK_PASSWORD=<your password>
+    volumes:
+      - '/var/run/docker.sock:/var/run/docker.sock:ro'
+
+  my-service:
+    image: 'busybox:latest'
+    command: 'sleep 3600'
+    labels:
+      - 'docker-compose-external-dns:1=[
+          { "type": "A", "name": "myservice.my-domain.com", "address": "1.2.3.4", "providers": "all" }]'
+```
+
+Explanation: The single A record is created on both CloudFlare and MikroTik. Useful when you want internal DNS to mirror public DNS for split-horizon setups.
