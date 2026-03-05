@@ -1,50 +1,21 @@
-import { IsEnum, IsFQDN } from 'class-validator';
+import { IsEnum, IsFQDN, IsOptional, IsArray, IsString } from 'class-validator';
 
-/**
- * Basic interface which says at least type must exist.
- */
 export interface IHasDnsType {
   type: DNSTypes;
 }
 
 /**
- * Properties expected if the entry originated from cloudflare
+ * @deprecated Replaced by IProviderRecord. Will be removed when CloudFlare
+ * provider is fully migrated to IDnsProvider in Task 7.
  */
 export interface ICloudFlareEntry extends IHasDnsType {
-  /**
-   * CloudFlare ID for this record
-   */
   id: string;
-
-  /**
-   * ID of the Zone this record belongs to in CloudFlare
-   */
   zoneId: string;
-
-  /**
-   * Name of this record.
-   * Must be a fully qualified domain name
-   */
   name: string;
-
-  /**
-   * Unique identifier for this record.
-   * Combination of zone id and name.
-   */
   get Key(): string;
-
-  /**
-   * Determines if this entry shares identical values with another entry.
-   * Does NOT check if identities match.
-   * @param otherEntry Entry to check for sameness
-   * @returns true if identical values else false
-   */
   hasSameValue(otherEntry: DnsbaseEntry): boolean;
 }
 
-/**
- * Types of DNS entry supported
- */
 export enum DNSTypes {
   A = 'A',
   CNAME = 'CNAME',
@@ -53,46 +24,43 @@ export enum DNSTypes {
   Unsupported = 'Unsupported',
 }
 
-/**
- * The base type for all DNS entries
- */
+/** Provider-specific options, keyed by providerKey */
+export interface IProviderOptions {
+  cf?: {
+    /** CloudFlare proxy toggle. Only meaningful for A and CNAME records. */
+    proxy?: boolean;
+  };
+  [key: string]: Record<string, unknown> | undefined;
+}
+
 export abstract class DnsbaseEntry {
-  /**
-   * The type of this record.
-   * For example:
-   * - A
-   * - CNAME
-   * - MX
-   * - NS
-   */
   @IsEnum(DNSTypes)
   type: DNSTypes;
 
-  /**
-   * The name of this record.
-   * Must be a FQDN.
-   *
-   * For example for a cname:
-   * test.mydomain.com
-   *
-   * For an a:
-   * mydomain.com
-   */
   @IsFQDN()
   name: string;
 
   /**
-   * Unique identitier for this entry as a string
+   * Normalized list of provider keys this entry targets.
+   * Values: ['cf'], ['mikrotik'], ['all'], ['cf', 'mikrotik'], etc.
+   * Set by DockerService during label parsing. Not present on CloudFlare/MikroTik records.
    */
-  get Key(): string {
-    return `${this.type}-${this.name}`;
-  }
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  providers?: string[];
 
   /**
-   * Compares the non identity values to determine if the values match.
-   * True if values match, else false.
-   * @param {DnsbaseEntry} otherEntry the entry to compare to
-   * @returns {boolean} true if values match, else false
+   * Provider-specific options extracted from the Docker label.
+   * Example: { cf: { proxy: true } } for CloudFlare proxy on A/CNAME records.
    */
+  @IsOptional()
+  providerOptions?: IProviderOptions;
+
+  /** Composite key for set-diff matching. Separator is `:` to avoid ambiguity. */
+  get Key(): string {
+    return `${this.type}:${this.name}`;
+  }
+
   abstract hasSameValue(otherEntry: DnsbaseEntry): boolean;
 }

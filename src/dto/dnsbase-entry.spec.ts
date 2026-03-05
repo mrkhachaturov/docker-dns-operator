@@ -34,8 +34,22 @@ describe('DnsbaseEntry', () => {
     expect(new MockDnsEntry()).toBeDefined();
   });
 
-  it('should return a unique identifier', () => {
-    expect(sut.Key).toEqual(`${sut.type}-${sut.name}`);
+  it('should return a unique identifier with colon separator', () => {
+    expect(sut.Key).toEqual(`${sut.type}:${sut.name}`);
+  });
+
+  it('should have providers defaulting to undefined', () => {
+    expect(sut.providers).toBeUndefined();
+  });
+
+  it('should accept providers array', () => {
+    sut.providers = ['cf', 'mikrotik'];
+    expect(sut.providers).toEqual(['cf', 'mikrotik']);
+  });
+
+  it('should accept providerOptions', () => {
+    sut.providerOptions = { cf: { proxy: true } };
+    expect(sut.providerOptions?.cf?.proxy).toBe(true);
   });
 
   describe('validation', () => {
