@@ -206,29 +206,6 @@ describe('App Configuration', () => {
       'false',
     ],
     ['valid', 'valid', 60, 120, undefined, 'invalid', 'debug', 'false'],
-    ['valid', 'valid', 60, 120, undefined, undefined, 'debug', 'false'],
-    ['valid', 'valid', 60, 120, undefined, '', 'debug', 'false'],
-    ['valid', 'valid', 60, 120, undefined, '   ', 'debug', 'false'],
-    [
-      'valid',
-      'valid',
-      60,
-      120,
-      apiTokenInvalidTestCases[0],
-      undefined,
-      'debug',
-      'false',
-    ],
-    [
-      'valid',
-      'valid',
-      60,
-      120,
-      apiTokenInvalidTestCases[1],
-      undefined,
-      'debug',
-      'false',
-    ],
     [
       'valid',
       'valid',
@@ -454,6 +431,55 @@ describe('App Configuration', () => {
       expect(sut.get('LOG_LEVEL', { infer: true })).toEqual('error');
     },
   );
+
+  it('should validate when only MikroTik vars are set (no CF creds required)', async () => {
+    delete process.env.API_TOKEN;
+    delete process.env.API_TOKEN_FILE;
+    process.env.MIKROTIK_BASEURL = 'https://192.168.1.1';
+    process.env.MIKROTIK_USERNAME = 'admin';
+    process.env.MIKROTIK_PASSWORD = 'secret';
+
+    const sut = await getSystemUnderTest();
+
+    expect(sut.get('MIKROTIK_BASEURL', { infer: true })).toBe('https://192.168.1.1');
+    expect(sut.get('MIKROTIK_USERNAME', { infer: true })).toBe('admin');
+
+    // cleanup
+    delete process.env.MIKROTIK_BASEURL;
+    delete process.env.MIKROTIK_USERNAME;
+    delete process.env.MIKROTIK_PASSWORD;
+  });
+
+  it('should reject partial MikroTik config (only baseurl set)', async () => {
+    delete process.env.API_TOKEN;
+    delete process.env.API_TOKEN_FILE;
+    process.env.MIKROTIK_BASEURL = 'https://192.168.1.1';
+    delete process.env.MIKROTIK_USERNAME;
+    delete process.env.MIKROTIK_PASSWORD;
+
+    await expect(getSystemUnderTest()).rejects.toThrow();
+
+    delete process.env.MIKROTIK_BASEURL;
+  });
+
+  it('should use MikroTik defaults', async () => {
+    delete process.env.API_TOKEN;
+    delete process.env.API_TOKEN_FILE;
+    process.env.MIKROTIK_BASEURL = 'https://192.168.1.1';
+    process.env.MIKROTIK_USERNAME = 'admin';
+    process.env.MIKROTIK_PASSWORD = 'secret';
+    delete process.env.MIKROTIK_SKIP_TLS_VERIFY;
+    delete process.env.MIKROTIK_DEFAULT_TTL;
+
+    const sut = await getSystemUnderTest();
+
+    expect(sut.get('MIKROTIK_SKIP_TLS_VERIFY', { infer: true })).toBe(false);
+    expect(sut.get('MIKROTIK_DEFAULT_TTL', { infer: true })).toBe(3600);
+
+    delete process.env.MIKROTIK_BASEURL;
+    delete process.env.MIKROTIK_USERNAME;
+    delete process.env.MIKROTIK_PASSWORD;
+  });
 
   describe('loadConfigurationApiTokenFile', () => {
     const envApiTokenFile = '/run/secrets/API_TOKEN_FILE';

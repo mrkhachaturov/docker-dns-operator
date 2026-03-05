@@ -26,22 +26,41 @@ export const validationSchema = Joi.object({
     .empty('')
     .default(60),
   PRESERVE_STOPPED: Joi.boolean().default(false),
+  // CloudFlare — both optional at schema level; runtime check in CloudFlareService.isConfigured()
   API_TOKEN: Joi.string()
     .pattern(/^[A-Za-z0-9_-]+$/)
     .min(10)
     .max(128)
     .trim()
-    .empty(),
+    .optional(),
   API_TOKEN_FILE: Joi.string()
     .pattern(/^\/run\/secrets\/[A-Za-z0-9-_]+$/)
     .trim()
-    .empty(),
+    .optional(),
   LOG_LEVEL: Joi.string()
     .trim()
     .empty('')
     .default('error')
     .allow('log', 'error', 'warn', 'debug', 'verbose', 'fatal'),
-}).xor('API_TOKEN', 'API_TOKEN_FILE');
+
+  // MikroTik — all optional at schema level; partial config guard below
+  MIKROTIK_BASEURL: Joi.string().uri().optional(),
+  MIKROTIK_USERNAME: Joi.string().min(1).trim().optional(),
+  MIKROTIK_PASSWORD: Joi.string().min(1).optional(),
+  MIKROTIK_SKIP_TLS_VERIFY: Joi.boolean().default(false),
+  MIKROTIK_DEFAULT_TTL: Joi.number().integer().min(1).default(3600),
+}).custom((value, helpers) => {
+  // Partial MikroTik config check: all-or-nothing
+  const { MIKROTIK_BASEURL, MIKROTIK_USERNAME, MIKROTIK_PASSWORD } = value;
+  const mikrotikVars = [MIKROTIK_BASEURL, MIKROTIK_USERNAME, MIKROTIK_PASSWORD];
+  const mikrotikSetCount = mikrotikVars.filter(Boolean).length;
+  if (mikrotikSetCount > 0 && mikrotikSetCount < 3) {
+    return helpers.error('any.invalid', {
+      message: 'MIKROTIK_BASEURL, MIKROTIK_USERNAME, and MIKROTIK_PASSWORD must all be set or all be absent',
+    });
+  }
+  return value;
+});
 
 /**
  * Loads the configuration api token file whilst the configuration is being loaded.
@@ -117,4 +136,9 @@ export interface IConfiguration {
   INSTANCE_ID: string;
   ENTRY_IDENTIFIER: string;
   PRESERVE_STOPPED: boolean;
+  MIKROTIK_BASEURL?: string;
+  MIKROTIK_USERNAME?: string;
+  MIKROTIK_PASSWORD?: string;
+  MIKROTIK_SKIP_TLS_VERIFY: boolean;
+  MIKROTIK_DEFAULT_TTL: number;
 }
