@@ -37,14 +37,14 @@ export class CloudFlareFactory {
    */
   createOrUpdateARecordParams(
     zoneId: string,
-    { name, address, proxy }: DnsaEntry,
+    entry: DnsaEntry,
   ): RecordCreateParams.ARecord | RecordUpdateParams.ARecord {
     return {
       zone_id: zoneId,
       type: 'A',
-      name,
-      content: address,
-      proxied: proxy,
+      name: entry.name,
+      content: entry.address,
+      proxied: entry.providerOptions?.cf?.proxy ?? false,
       comment: this.configService.get<string>('ENTRY_IDENTIFIER', {
         infer: true,
       }),
@@ -60,14 +60,14 @@ export class CloudFlareFactory {
    */
   createOrUpdateCNAMERecordParams(
     zoneId: string,
-    { name, target, proxy }: DnsCnameEntry,
+    entry: DnsCnameEntry,
   ): RecordCreateParams.CNAMERecord | RecordUpdateParams.CNAMERecord {
     return {
       zone_id: zoneId,
       type: 'CNAME',
-      name,
-      content: target,
-      proxied: proxy,
+      name: entry.name,
+      content: entry.target,
+      proxied: entry.providerOptions?.cf?.proxy ?? false,
       comment: this.configService.get<string>('ENTRY_IDENTIFIER', {
         infer: true,
       }),

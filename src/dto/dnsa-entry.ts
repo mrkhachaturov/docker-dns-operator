@@ -1,35 +1,22 @@
 import { Validate } from 'class-validator';
-import { DnsbaseCloudflareProxyEntry } from './dnsbase-cloudflare-proxy-entry';
+import { DnsbaseEntry } from './dnsbase-entry';
 import { DNSTypes, IHasDnsType } from './dnsbase-entry';
 import { IsIPOrDDNS } from '../validators/iporddns.validator';
 
-/**
- * Represents an A record
- */
-export class DnsaEntry extends DnsbaseCloudflareProxyEntry {
-  /**
-   * IP Address this DNSA record points to.
-   */
+export class DnsaEntry extends DnsbaseEntry {
   @Validate(IsIPOrDDNS)
   address: string;
 
   /**
-   * Determines if two DNSaEntries share the same values (not identities!)
-   * @param otherEntry Entry to compare values for
-   * @returns True if they have the same values, otherwise false
+   * Provider-neutral comparison — only checks address.
+   * Proxy is NOT checked here. CloudflareProviderRecord.hasSameValue reads
+   * desiredEntry.providerOptions.cf.proxy and compares it to its own proxy field.
    */
   hasSameValue(otherEntry: DnsaEntry): boolean {
-    return (
-      this.address === otherEntry.address && this.proxy === otherEntry.proxy
-    );
+    return this.address === otherEntry.address;
   }
 }
 
-/**
- * TypeGuard to determine if the instance is a DnsaEntry
- * @param {IHasnsType} entr implements the type property
- * @returns true if DnsaEntry else false
- */
 export function isDnsAEntry(entry: IHasDnsType): entry is DnsaEntry {
   return entry.type === DNSTypes.A;
 }

@@ -2,22 +2,17 @@ import each from 'jest-each';
 import { validate } from 'class-validator';
 import { DNSTypes } from './dnsbase-entry';
 import { DnsaEntry } from './dnsa-entry';
-import { DnsaCloudflareEntry } from './dnsa-cloudflare-entry';
 
-/**
- * Returns a new valid DnsAEntry.
- * Used by other test cases
- * @returns {DnsaEntry} result
- */
-export function validDnsAEntry<T extends DnsaEntry | DnsaCloudflareEntry>(
+export function validDnsAEntry<T extends DnsaEntry>(
   EntryType: new () => T,
-  defaults?: Partial<T>,
-) {
+  defaults?: Partial<T> & { proxy?: boolean },
+): T {
   const result = new EntryType();
   result.type = DNSTypes.A;
   result.name = defaults?.name ?? 'testdomain.com';
   result.address = defaults?.address ?? '8.8.8.8';
-  result.proxy = defaults?.proxy ?? false;
+  result.providers = ['cf'];
+  result.providerOptions = { cf: { proxy: defaults?.proxy ?? false } };
   return result;
 }
 
@@ -33,75 +28,39 @@ describe('DnsaEntry', () => {
   });
 
   describe('hasSameValue', () => {
-    each([DnsaEntry, DnsaCloudflareEntry]).it(
-      'should have the same value, but different identity (type %p)',
-      (type) => {
-        // arrange
-        const entry = validDnsAEntry(type);
-        const compare = validDnsAEntry(type);
-        compare.name = `${entry.name}-1`;
-        compare.type = DNSTypes.CNAME;
+    it('should be same value when address and proxy match', () => {
+      const a = validDnsAEntry(DnsaEntry);
+      const b = validDnsAEntry(DnsaEntry);
+      expect(a.hasSameValue(b)).toBe(true);
+    });
 
-        // act / assert
-        expect(entry.hasSameValue(compare)).toBe(true);
-        expect(entry.Key).not.toEqual(compare.Key);
-      },
-    );
+    it('should not be same value when address differs', () => {
+      const a = validDnsAEntry(DnsaEntry);
+      const b = validDnsAEntry(DnsaEntry, { address: '1.1.1.1' });
+      expect(a.hasSameValue(b)).toBe(false);
+    });
 
-    each([DnsaEntry, DnsaCloudflareEntry]).it(
-      'should have the same value and identity (type %p)',
-      (type) => {
-        // arrange
-        const entry = validDnsAEntry(type);
-        const compare = validDnsAEntry(type);
+    it('should be same value regardless of proxy (provider-neutral — proxy comparison is IProviderRecord responsibility)', () => {
+      const a = validDnsAEntry(DnsaEntry, { proxy: false });
+      const b = validDnsAEntry(DnsaEntry, { proxy: true });
+      expect(a.hasSameValue(b)).toBe(true);
+    });
 
-        // act
-        expect(entry.hasSameValue(compare)).toBe(true);
-        expect(entry.Key).toEqual(compare.Key);
-      },
-    );
+    it('should have same value but different identity', () => {
+      const entry = validDnsAEntry(DnsaEntry);
+      const compare = validDnsAEntry(DnsaEntry);
+      compare.name = `${entry.name}-1`;
+      compare.type = DNSTypes.CNAME;
+      expect(entry.hasSameValue(compare)).toBe(true);
+      expect(entry.Key).not.toEqual(compare.Key);
+    });
 
-    each([
-      [DnsaEntry, 'different.com', undefined],
-      [DnsaEntry, undefined, true],
-      [DnsaEntry, 'different.com', true],
-      [DnsaCloudflareEntry, 'different.com', undefined],
-      [DnsaCloudflareEntry, undefined, true],
-      [DnsaCloudflareEntry, 'different.com', true],
-    ]).it(
-      'should not have the same value or identity (type: %p, address: %p, proxy: %p)',
-      (type, address, proxy) => {
-        // arrange
-        const entry = validDnsAEntry(type);
-        const compare = validDnsAEntry(type);
-        compare.name = `${entry.name}-1`;
-        compare.type = DNSTypes.CNAME;
-        compare.address = address ?? entry.address;
-        compare.proxy = proxy === undefined ? entry.proxy : proxy;
-
-        // act / assert
-        expect(entry.hasSameValue(compare)).toBe(false);
-        expect(entry.Key).not.toEqual(compare.Key);
-      },
-    );
-
-    each([
-      [DnsaEntry, 'different.com', undefined],
-      [DnsaEntry, undefined, true],
-      [DnsaEntry, 'different.com', true],
-      [DnsaCloudflareEntry, 'different.com', undefined],
-      [DnsaCloudflareEntry, undefined, true],
-      [DnsaCloudflareEntry, 'different.com', true],
-    ]).it(
-      'should not have the same value, but same identity (type %p)',
-      (type, address, proxy) => {
-        // arrange
-        const entry = validDnsAEntry(type);
-        const compare = validDnsAEntry(type);
-        compare.address = address ?? entry.address;
-        compare.proxy = proxy === undefined ? entry.proxy : proxy;
-
-        // act
+    each([['different.com']]).it(
+      'should not have the same value when address differs (%p)',
+      (address) => {
+        const entry = validDnsAEntry(DnsaEntry);
+        const compare = validDnsAEntry(DnsaEntry);
+        compare.address = address;
         expect(entry.hasSameValue(compare)).toBe(false);
         expect(entry.Key).toEqual(compare.Key);
       },
@@ -110,35 +69,19 @@ describe('DnsaEntry', () => {
 
   describe('validation', () => {
     describe('address', () => {
-      /**
-       * Unit testing the validator decorators are tricky.
-       * This is a small integration test to ensure the basic behavior is working.
-       * This gives confidence the decorator is being used.
-       */
-
       it('should be valid - DDNS', async () => {
-        // arrange
         sut.address = 'DDNS';
-
-        // act / assert
         await expect(validate(sut)).resolves.toHaveLength(0);
       });
 
       it('should be valid - IP', async () => {
-        // arrange
         sut.address = '8.8.8.8';
-
-        // act / assert
         await expect(validate(sut)).resolves.toHaveLength(0);
       });
 
       it('should be invalid', async () => {
-        // arrange
         sut.address = 'invalid';
-
-        // act / assert
         const result = await validate(sut);
-
         expect(result).toHaveLength(1);
         expect(result[0].property).toEqual('address');
         expect(result[0].value).toEqual(sut.address);

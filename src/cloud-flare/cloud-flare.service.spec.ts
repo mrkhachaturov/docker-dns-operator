@@ -572,21 +572,23 @@ describe('CloudFlareService', () => {
       // supported records
       const mockDNSAEntry = validDnsAEntry(DnsaCloudflareEntry);
       mockDNSAEntry.zoneId = paramZoneId;
+      mockDNSAEntry.providers = undefined;
       const mockCloudFlareARecord = new CloudFlareDNSRecordBuilder<ARecord>()
         .WithType('A')
         .WithName(mockDNSAEntry.name)
         .WithContent(mockDNSAEntry.address)
-        .WithProxied(mockDNSAEntry.proxy)
+        .WithProxied(mockDNSAEntry.providerOptions?.cf?.proxy ?? false)
         .Build();
       mockDNSAEntry.id = mockCloudFlareARecord.id as string;
       const mockDNSCNAMEEntry = validDnsCnameEntry(DnsCnameCloudflareEntry);
       mockDNSCNAMEEntry.zoneId = paramZoneId;
+      mockDNSCNAMEEntry.providers = undefined;
       const mockCloudFlareCNAMERecord =
         new CloudFlareDNSRecordBuilder<CNAMERecord>()
           .WithType('CNAME')
           .WithName(mockDNSCNAMEEntry.name)
           .WithContent(mockDNSCNAMEEntry.target)
-          .WithProxied(mockDNSCNAMEEntry.proxy)
+          .WithProxied(mockDNSCNAMEEntry.providerOptions?.cf?.proxy ?? false)
           .Build();
       mockDNSCNAMEEntry.id = mockCloudFlareCNAMERecord.id as string;
       const mockDNSMXEntry = validDnsMxEntry(DnsMxCloudflareEntry);

@@ -57,7 +57,7 @@ describe('CloudFlareFactory', () => {
       type: 'A',
       name: param.name,
       content: param.address,
-      proxied: param.proxy,
+      proxied: param.providerOptions?.cf?.proxy ?? false,
       comment: paramEntryIdentifier,
     };
 
@@ -87,7 +87,7 @@ describe('CloudFlareFactory', () => {
       type: 'CNAME',
       name: param.name,
       content: param.target,
-      proxied: param.proxy,
+      proxied: param.providerOptions?.cf?.proxy ?? false,
       comment: paramEntryIdentifier,
     };
 

@@ -209,7 +209,7 @@ export class CloudFlareService {
           const { content, proxied } = cloudFlareEntry as ARecord;
           const entry = new DnsaCloudflareEntry();
           entry.address = content;
-          entry.proxy = proxied as boolean;
+          entry.providerOptions = { cf: { proxy: proxied as boolean } };
           entry.type = DNSTypes.A;
           result = entry;
           break;
@@ -218,7 +218,7 @@ export class CloudFlareService {
           const { content, proxied } = cloudFlareEntry as CNAMERecord;
           const entry = new DnsCnameCloudflareEntry();
           entry.target = content as string;
-          entry.proxy = proxied as boolean;
+          entry.providerOptions = { cf: { proxy: proxied as boolean } };
           entry.type = DNSTypes.CNAME;
           result = entry;
           break;
