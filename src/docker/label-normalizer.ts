@@ -58,7 +58,9 @@ export function parseProxyBoolean(value: unknown): boolean | null {
  * Handles both legacy top-level `proxy` and explicit `providerOptions.cf.proxy`.
  * Returns null if proxy is present but has an invalid type (caller must warn + skip entry).
  */
-export function normalizeProviderOptions(raw: Record<string, unknown>): IProviderOptions | null | undefined {
+export function normalizeProviderOptions(
+  raw: Record<string, unknown>,
+): IProviderOptions | null | undefined {
   // Explicit nested form takes precedence
   const nested = (raw.providerOptions as any)?.cf?.proxy;
   if (nested !== undefined) {

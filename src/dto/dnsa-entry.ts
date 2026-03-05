@@ -1,6 +1,5 @@
 import { Validate } from 'class-validator';
-import { DnsbaseEntry } from './dnsbase-entry';
-import { DNSTypes, IHasDnsType } from './dnsbase-entry';
+import { DnsbaseEntry, DNSTypes, IHasDnsType } from './dnsbase-entry';
 import { IsIPOrDDNS } from '../validators/iporddns.validator';
 
 export class DnsaEntry extends DnsbaseEntry {

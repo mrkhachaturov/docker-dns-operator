@@ -9,14 +9,16 @@ import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import Cloudflare from 'cloudflare';
 import { createMock, DeepMocked } from '@golevelup/ts-jest';
-import { Zone, ZonesV4PagePaginationArray } from 'cloudflare/resources/zones/zones';
+import {
+  Zone,
+  ZonesV4PagePaginationArray,
+} from 'cloudflare/resources/zones/zones';
 import { RecordsV4PagePaginationArray } from 'cloudflare/resources/dns/records';
 import { AppModule } from '../src/app.module';
 import { AppService } from '../src/app.service';
 import { DockerService } from '../src/docker/docker.service';
 import { getConfigModuleImport } from '../src/app.configuration';
 import { DnsaEntry } from '../src/dto/dnsa-entry';
-import { DNSTypes } from '../src/dto/dnsbase-entry';
 import { validDnsAEntry } from '../src/dto/dnsa-entry.spec';
 
 jest.mock('cloudflare');
@@ -75,7 +77,8 @@ describe('AppService — provider routing (e2e)', () => {
     sut.initialize();
 
     // Capture CF mock instance (created inside CloudFlareService.initialize())
-    const mockCloudflareInstance = mockCloudflare.mock.instances[0] as jest.Mocked<Cloudflare>;
+    const mockCloudflareInstance = mockCloudflare.mock
+      .instances[0] as jest.Mocked<Cloudflare>;
 
     const emptyRecordsPage = {
       hasNextPage: jest.fn(() => false),
@@ -120,7 +123,9 @@ describe('AppService — provider routing (e2e)', () => {
   it('entry with providers=["cf"] is only synced to CloudFlare', async () => {
     const cfEntry = makeEntry('cf-only.testdomain.com', ['cf']);
     mockDockerService.getContainers.mockResolvedValue([]);
-    (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([cfEntry]);
+    (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
+      cfEntry,
+    ]);
 
     await sut.job();
 
@@ -136,10 +141,12 @@ describe('AppService — provider routing (e2e)', () => {
   it('entry with providers=["mikrotik"] is only synced to MikroTik', async () => {
     const mtEntry = makeEntry('mikrotik-only.testdomain.com', ['mikrotik']);
     mockDockerService.getContainers.mockResolvedValue([]);
-    (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([mtEntry]);
+    (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
+      mtEntry,
+    ]);
     // MikroTik: getRecords then createEntry
     mockFetch
-      .mockResolvedValueOnce(makeJsonResponse([]))  // getRecords
+      .mockResolvedValueOnce(makeJsonResponse([])) // getRecords
       .mockResolvedValueOnce(makeJsonResponse({ '.id': '*1' })); // createEntry
 
     await sut.job();
@@ -157,9 +164,11 @@ describe('AppService — provider routing (e2e)', () => {
   it('entry with providers=["cf","mikrotik"] is synced to both', async () => {
     const bothEntry = makeEntry('both.testdomain.com', ['cf', 'mikrotik']);
     mockDockerService.getContainers.mockResolvedValue([]);
-    (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([bothEntry]);
+    (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
+      bothEntry,
+    ]);
     mockFetch
-      .mockResolvedValueOnce(makeJsonResponse([]))  // getRecords
+      .mockResolvedValueOnce(makeJsonResponse([])) // getRecords
       .mockResolvedValueOnce(makeJsonResponse({ '.id': '*1' })); // createEntry
 
     await sut.job();
@@ -172,10 +181,14 @@ describe('AppService — provider routing (e2e)', () => {
   });
 
   it('entry without providers field defaults to CF only (backward compat)', async () => {
-    const defaultEntry = validDnsAEntry(DnsaEntry, { name: 'default.testdomain.com' });
+    const defaultEntry = validDnsAEntry(DnsaEntry, {
+      name: 'default.testdomain.com',
+    });
     defaultEntry.providers = undefined;
     mockDockerService.getContainers.mockResolvedValue([]);
-    (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([defaultEntry]);
+    (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
+      defaultEntry,
+    ]);
 
     await sut.job();
 
@@ -189,9 +202,11 @@ describe('AppService — provider routing (e2e)', () => {
   it('entry with providers=["all"] is synced to both CF and MikroTik', async () => {
     const allEntry = makeEntry('all.testdomain.com', ['all']);
     mockDockerService.getContainers.mockResolvedValue([]);
-    (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([allEntry]);
+    (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
+      allEntry,
+    ]);
     mockFetch
-      .mockResolvedValueOnce(makeJsonResponse([]))  // getRecords
+      .mockResolvedValueOnce(makeJsonResponse([])) // getRecords
       .mockResolvedValueOnce(makeJsonResponse({ '.id': '*1' })); // createEntry
 
     await sut.job();

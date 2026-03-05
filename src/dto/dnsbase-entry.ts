@@ -4,7 +4,6 @@ export interface IHasDnsType {
   type: DNSTypes;
 }
 
-
 export enum DNSTypes {
   A = 'A',
   CNAME = 'CNAME',

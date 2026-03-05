@@ -1,7 +1,7 @@
+import { createMock, DeepMocked } from '@golevelup/ts-jest';
 import { ProviderRegistry } from './provider-registry.service';
 import { IDnsProvider } from './dns-provider.interface';
 import { ConsoleLoggerService } from '../logger.service';
-import { createMock, DeepMocked } from '@golevelup/ts-jest';
 
 function makeProvider(key: string, configured: boolean): IDnsProvider {
   return {
@@ -40,7 +40,9 @@ describe('ProviderRegistry', () => {
         [makeProvider('cf', false), makeProvider('mikrotik', false)],
         logger,
       );
-      expect(() => emptyRegistry.initialize()).toThrow('No providers configured');
+      expect(() => emptyRegistry.initialize()).toThrow(
+        'No providers configured',
+      );
     });
   });
 

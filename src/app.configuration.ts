@@ -56,7 +56,8 @@ export const validationSchema = Joi.object({
   const mikrotikSetCount = mikrotikVars.filter(Boolean).length;
   if (mikrotikSetCount > 0 && mikrotikSetCount < 3) {
     return helpers.error('any.invalid', {
-      message: 'MIKROTIK_BASEURL, MIKROTIK_USERNAME, and MIKROTIK_PASSWORD must all be set or all be absent',
+      message:
+        'MIKROTIK_BASEURL, MIKROTIK_USERNAME, and MIKROTIK_PASSWORD must all be set or all be absent',
     });
   }
   return value;

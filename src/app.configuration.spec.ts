@@ -441,7 +441,9 @@ describe('App Configuration', () => {
 
     const sut = await getSystemUnderTest();
 
-    expect(sut.get('MIKROTIK_BASEURL', { infer: true })).toBe('https://192.168.1.1');
+    expect(sut.get('MIKROTIK_BASEURL', { infer: true })).toBe(
+      'https://192.168.1.1',
+    );
     expect(sut.get('MIKROTIK_USERNAME', { infer: true })).toBe('admin');
 
     // cleanup

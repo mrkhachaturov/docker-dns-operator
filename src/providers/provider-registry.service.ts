@@ -12,6 +12,7 @@ export class ProviderRegistry {
   ) {}
 
   initialize(): void {
+    // eslint-disable-next-line no-restricted-syntax
     for (const provider of this.providers) {
       if (provider.isConfigured()) {
         provider.initialize();

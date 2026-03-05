@@ -11,16 +11,23 @@ import { isDnsNsEntry } from '../dto/dnsns-entry';
  */
 export class CloudflareProviderRecord implements IProviderRecord {
   id: string;
+
   name: string;
+
   type: DNSTypes;
+
   zoneId: string;
 
   // Type-specific data
-  address?: string;   // A
-  target?: string;    // CNAME
-  server?: string;    // MX, NS
-  priority?: number;  // MX
-  proxy?: boolean;    // A, CNAME
+  address?: string; // A
+
+  target?: string; // CNAME
+
+  server?: string; // MX, NS
+
+  priority?: number; // MX
+
+  proxy?: boolean; // A, CNAME
 
   get Key(): string {
     return `${this.type}:${this.name}`;

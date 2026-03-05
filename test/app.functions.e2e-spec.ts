@@ -1,20 +1,21 @@
 import { validDnsCnameEntry } from '../src/dto/dnscname-entry.spec';
 import { validDnsMxEntry } from '../src/dto/dnsmx-entry.spec';
 import { validDnsNsEntry } from '../src/dto/dnsns-entry.spec';
-import { DnsCnameEntry } from '../src/dto/dnscname-entry';
-import { DnsMxEntry } from '../src/dto/dnsmx-entry';
-import { DnsNsEntry } from '../src/dto/dnsns-entry';
+import { DnsCnameEntry, isDnsCnameEntry } from '../src/dto/dnscname-entry';
+import { DnsMxEntry, isDnsMxEntry } from '../src/dto/dnsmx-entry';
+import { DnsNsEntry, isDnsNsEntry } from '../src/dto/dnsns-entry';
 import { validDnsAEntry } from '../src/dto/dnsa-entry.spec';
 import { DnsaEntry, isDnsAEntry } from '../src/dto/dnsa-entry';
 import { DnsbaseEntry } from '../src/dto/dnsbase-entry';
-import { isDnsCnameEntry } from '../src/dto/dnscname-entry';
-import { isDnsMxEntry } from '../src/dto/dnsmx-entry';
-import { isDnsNsEntry } from '../src/dto/dnsns-entry';
 import { CloudflareProviderRecord } from '../src/cloud-flare/cloudflare-provider-record';
 import { computeSetDifference } from '../src/app.functions';
 
 /** Build a CloudflareProviderRecord from a DnsbaseEntry for test purposes. */
-function toCFRecord(entry: DnsbaseEntry, zoneId = 'zone-1', id = 'test-id'): CloudflareProviderRecord {
+function toCFRecord(
+  entry: DnsbaseEntry,
+  zoneId = 'zone-1',
+  id = 'test-id',
+): CloudflareProviderRecord {
   const r = new CloudflareProviderRecord();
   r.id = id;
   r.name = entry.name;
@@ -63,10 +64,26 @@ describe('AppFunctions (Integration)', () => {
       ];
 
       const toUpdateCloudFlare = [
-        toCFRecord(validDnsAEntry(DnsaEntry, { name: 'to-update' }), 'zone-1', 'to-update-id'),
-        toCFRecord(validDnsCnameEntry(DnsCnameEntry, { name: 'to-update' }), 'zone-1', 'to-update-id'),
-        toCFRecord(validDnsMxEntry(DnsMxEntry, { name: 'to-update' }), 'zone-1', 'to-update-id'),
-        toCFRecord(validDnsNsEntry(DnsNsEntry, { name: 'to-update' }), 'zone-1', 'to-update-id'),
+        toCFRecord(
+          validDnsAEntry(DnsaEntry, { name: 'to-update' }),
+          'zone-1',
+          'to-update-id',
+        ),
+        toCFRecord(
+          validDnsCnameEntry(DnsCnameEntry, { name: 'to-update' }),
+          'zone-1',
+          'to-update-id',
+        ),
+        toCFRecord(
+          validDnsMxEntry(DnsMxEntry, { name: 'to-update' }),
+          'zone-1',
+          'to-update-id',
+        ),
+        toCFRecord(
+          validDnsNsEntry(DnsNsEntry, { name: 'to-update' }),
+          'zone-1',
+          'to-update-id',
+        ),
       ];
 
       const unchangedDocker = [
@@ -84,7 +101,11 @@ describe('AppFunctions (Integration)', () => {
       ];
 
       const toDelete = [
-        toCFRecord(validDnsAEntry(DnsaEntry, { name: 'to-delete' }), 'zone-1', 'to-delete-id'),
+        toCFRecord(
+          validDnsAEntry(DnsaEntry, { name: 'to-delete' }),
+          'zone-1',
+          'to-delete-id',
+        ),
       ];
 
       // act / assert

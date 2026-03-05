@@ -1,6 +1,5 @@
 import { IsFQDN } from 'class-validator';
-import { DnsbaseEntry } from './dnsbase-entry';
-import { DNSTypes, IHasDnsType } from './dnsbase-entry';
+import { DnsbaseEntry, DNSTypes, IHasDnsType } from './dnsbase-entry';
 
 export class DnsCnameEntry extends DnsbaseEntry {
   @IsFQDN()

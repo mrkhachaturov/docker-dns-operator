@@ -5,7 +5,9 @@ import { DnsCnameEntry } from '../dto/dnscname-entry';
 import { DnsMxEntry } from '../dto/dnsmx-entry';
 import { DnsNsEntry } from '../dto/dnsns-entry';
 
-function makeRecord(overrides: Partial<CloudflareProviderRecord> = {}): CloudflareProviderRecord {
+function makeRecord(
+  overrides: Partial<CloudflareProviderRecord> = {},
+): CloudflareProviderRecord {
   const r = new CloudflareProviderRecord();
   r.id = overrides.id ?? 'rec-id';
   r.name = overrides.name ?? 'test.example.com';
@@ -37,7 +39,11 @@ describe('CloudflareProviderRecord', () => {
   describe('hasSameValue', () => {
     describe('A record', () => {
       it('returns true when address and proxy match', () => {
-        const record = makeRecord({ type: DNSTypes.A, address: '1.2.3.4', proxy: false });
+        const record = makeRecord({
+          type: DNSTypes.A,
+          address: '1.2.3.4',
+          proxy: false,
+        });
         const entry = new DnsaEntry();
         entry.type = DNSTypes.A;
         entry.name = 'test.example.com';
@@ -47,7 +53,11 @@ describe('CloudflareProviderRecord', () => {
       });
 
       it('returns false when address differs', () => {
-        const record = makeRecord({ type: DNSTypes.A, address: '1.2.3.4', proxy: false });
+        const record = makeRecord({
+          type: DNSTypes.A,
+          address: '1.2.3.4',
+          proxy: false,
+        });
         const entry = new DnsaEntry();
         entry.address = '5.5.5.5';
         entry.providerOptions = { cf: { proxy: false } };
@@ -55,7 +65,11 @@ describe('CloudflareProviderRecord', () => {
       });
 
       it('returns false when proxy differs', () => {
-        const record = makeRecord({ type: DNSTypes.A, address: '1.2.3.4', proxy: false });
+        const record = makeRecord({
+          type: DNSTypes.A,
+          address: '1.2.3.4',
+          proxy: false,
+        });
         const entry = new DnsaEntry();
         entry.address = '1.2.3.4';
         entry.providerOptions = { cf: { proxy: true } };
@@ -65,7 +79,11 @@ describe('CloudflareProviderRecord', () => {
 
     describe('CNAME record', () => {
       it('returns true when target and proxy match', () => {
-        const record = makeRecord({ type: DNSTypes.CNAME, target: 'other.com', proxy: true });
+        const record = makeRecord({
+          type: DNSTypes.CNAME,
+          target: 'other.com',
+          proxy: true,
+        });
         const entry = new DnsCnameEntry();
         entry.type = DNSTypes.CNAME;
         entry.target = 'other.com';
@@ -76,7 +94,11 @@ describe('CloudflareProviderRecord', () => {
 
     describe('MX record', () => {
       it('returns true when server and priority match', () => {
-        const record = makeRecord({ type: DNSTypes.MX, server: 'mx.mail.com', priority: 10 });
+        const record = makeRecord({
+          type: DNSTypes.MX,
+          server: 'mx.mail.com',
+          priority: 10,
+        });
         const entry = new DnsMxEntry();
         entry.type = DNSTypes.MX;
         entry.server = 'mx.mail.com';

@@ -14,7 +14,10 @@ import { DockerFactory } from './docker.factory';
 import { DnsaEntry } from '../dto/dnsa-entry';
 import { DnsBaseCloudflareEntry } from '../dto/dnsbase-entry.spec';
 import { getLogClassDecorator } from '../utility.functions';
-import { normalizeProviders, normalizeProviderOptions } from './label-normalizer';
+import {
+  normalizeProviders,
+  normalizeProviderOptions,
+} from './label-normalizer';
 
 let loggerPointer: LoggerService;
 const LogDecorator = getLogClassDecorator(() => loggerPointer);
@@ -152,7 +155,10 @@ export class DockerService {
           const rawEntry = entry as Record<string, unknown>;
 
           // Normalize providers
-          const providers = normalizeProviders(rawEntry.provider, rawEntry.providers);
+          const providers = normalizeProviders(
+            rawEntry.provider,
+            rawEntry.providers,
+          );
           if (providers === null) {
             this.loggerService.warn(
               `DockerService, extractDNSEntries: container ${current.Id} has malformed providers field, entry skipped`,
@@ -170,7 +176,13 @@ export class DockerService {
           }
 
           // Strip raw proxy/provider fields before instantiation
-          const { proxy, provider, providers: _p, providerOptions: _po, ...restEntry } = rawEntry;
+          const {
+            proxy,
+            provider,
+            providers: rawProvidersField,
+            providerOptions: rawProviderOptionsField,
+            ...restEntry
+          } = rawEntry;
 
           // Cast to appropriate type
           let instance: DnsbaseEntry;

@@ -8,8 +8,6 @@ import {
   MXRecord,
   NSRecord,
   Record,
-  RecordCreateParams,
-  RecordUpdateParams,
 } from 'cloudflare/resources/dns/records';
 import { ConsoleLoggerService } from '../logger.service';
 import { DnsbaseEntry, DNSTypes } from '../dto/dnsbase-entry';
@@ -57,6 +55,7 @@ export class CloudFlareService implements IDnsProvider {
   /**
    * Returns true if the CloudFlare API token is configured in the environment.
    */
+  // eslint-disable-next-line class-methods-use-this
   isConfigured(): boolean {
     return !!(process.env.API_TOKEN || process.env.API_TOKEN_FILE);
   }
@@ -102,6 +101,7 @@ export class CloudFlareService implements IDnsProvider {
     if (!this.cachedZones)
       throw new Error('CloudFlareService: call prepareForJob() first');
     const allRecords: CloudflareProviderRecord[] = [];
+    // eslint-disable-next-line no-restricted-syntax
     for (const zone of this.cachedZones) {
       // eslint-disable-next-line no-await-in-loop
       const raw = await this.getDNSEntries(zone.id);

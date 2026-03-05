@@ -1,5 +1,4 @@
-import { DNSTypes } from '../dto/dnsbase-entry';
-import { DnsbaseEntry } from '../dto/dnsbase-entry';
+import { DNSTypes, DnsbaseEntry } from '../dto/dnsbase-entry';
 
 /**
  * A DNS record as read from a provider's current state.

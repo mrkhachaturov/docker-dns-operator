@@ -584,7 +584,8 @@ describe('CloudFlareService', () => {
             .WithContent(opts.content ?? '')
             .Build() as DeepMocked<T>;
           if (opts.proxied !== undefined) (raw as any).proxied = opts.proxied;
-          if (opts.priority !== undefined) (raw as any).priority = opts.priority;
+          if (opts.priority !== undefined)
+            (raw as any).priority = opts.priority;
 
           const exp = new CloudflareProviderRecord();
           exp.id = raw.id as string;
@@ -616,17 +617,47 @@ describe('CloudFlareService', () => {
           return { raw, expected: exp };
         }
 
-        const { raw: rawA, expected: expA } = makeRawAndExpected<ARecord>('A', 'testdomain.com', { content: '8.8.8.8', proxied: false });
-        const { raw: rawCNAME, expected: expCNAME } = makeRawAndExpected<CNAMERecord>('CNAME', 'test.testdomain.com', { content: 'testdomain.com', proxied: false });
-        const { raw: rawMX, expected: expMX } = makeRawAndExpected<MXRecord>('MX', 'testdomain.com', { content: 'mx1.testdomain.com', priority: 50 });
-        const { raw: rawNS, expected: expNS } = makeRawAndExpected<NSRecord>('NS', 'testdomain.com', { content: 'ns1.testdomain.com' });
+        const { raw: rawA, expected: expA } = makeRawAndExpected<ARecord>(
+          'A',
+          'testdomain.com',
+          { content: '8.8.8.8', proxied: false },
+        );
+        const { raw: rawCNAME, expected: expCNAME } =
+          makeRawAndExpected<CNAMERecord>('CNAME', 'test.testdomain.com', {
+            content: 'testdomain.com',
+            proxied: false,
+          });
+        const { raw: rawMX, expected: expMX } = makeRawAndExpected<MXRecord>(
+          'MX',
+          'testdomain.com',
+          { content: 'mx1.testdomain.com', priority: 50 },
+        );
+        const { raw: rawNS, expected: expNS } = makeRawAndExpected<NSRecord>(
+          'NS',
+          'testdomain.com',
+          { content: 'ns1.testdomain.com' },
+        );
 
-        const mockCloudFlareEntries: DeepMocked<Record>[] = [rawA, rawCNAME, rawMX, rawNS];
-        const mockExpected: CloudflareProviderRecord[] = [expA, expCNAME, expMX, expNS];
+        const mockCloudFlareEntries: DeepMocked<Record>[] = [
+          rawA,
+          rawCNAME,
+          rawMX,
+          rawNS,
+        ];
+        const mockExpected: CloudflareProviderRecord[] = [
+          expA,
+          expCNAME,
+          expMX,
+          expNS,
+        ];
         const warnMessages: string[] = [];
 
         const unsupportedEntryFactory = <T extends Record>(typeId: string) => {
-          const { raw, expected: exp } = makeRawAndExpected<T>(typeId, 'unsupported', { content: 'to-be-ignored' });
+          const { raw, expected: exp } = makeRawAndExpected<T>(
+            typeId,
+            'unsupported',
+            { content: 'to-be-ignored' },
+          );
           mockCloudFlareEntries.push(raw);
           mockExpected.push(exp);
           warnMessages.push(
@@ -656,7 +687,9 @@ describe('CloudFlareService', () => {
 
         // assert
         expect(result).toEqual(mockExpected);
-        expect(mockConsoleLoggerService.warn).toHaveBeenCalledTimes(warnMessages.length);
+        expect(mockConsoleLoggerService.warn).toHaveBeenCalledTimes(
+          warnMessages.length,
+        );
         warnMessages.forEach((message) => {
           expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(message);
         });
@@ -692,7 +725,9 @@ describe('CloudFlareService', () => {
         await sut.createEntry(paramEntry);
 
         // assert
-        expect(mockCloudFlareFactory.createOrUpdateParams).toHaveBeenCalledTimes(1);
+        expect(
+          mockCloudFlareFactory.createOrUpdateParams,
+        ).toHaveBeenCalledTimes(1);
         expect(mockCloudFlareFactory.createOrUpdateParams).toHaveBeenCalledWith(
           paramZoneId,
           paramEntry,
@@ -718,7 +753,9 @@ describe('CloudFlareService', () => {
         await sut.createEntry(entry);
 
         // assert
-        expect(mockCloudFlareFactory.createOrUpdateParams).not.toHaveBeenCalled();
+        expect(
+          mockCloudFlareFactory.createOrUpdateParams,
+        ).not.toHaveBeenCalled();
         expect(mockRecords.create).not.toHaveBeenCalled();
         expect(mockConsoleLoggerService.warn).toHaveBeenCalled();
       });
@@ -769,13 +806,18 @@ describe('CloudFlareService', () => {
         await sut.updateEntry(oldRecord, desired);
 
         // assert
-        expect(mockCloudFlareFactory.createOrUpdateParams).toHaveBeenCalledTimes(1);
+        expect(
+          mockCloudFlareFactory.createOrUpdateParams,
+        ).toHaveBeenCalledTimes(1);
         expect(mockCloudFlareFactory.createOrUpdateParams).toHaveBeenCalledWith(
           paramZoneId,
           desired,
         );
         expect(mockRecords.update).toHaveBeenCalledTimes(1);
-        expect(mockRecords.update).toHaveBeenCalledWith(oldRecord.id, mockParams);
+        expect(mockRecords.update).toHaveBeenCalledWith(
+          oldRecord.id,
+          mockParams,
+        );
         expect(mockConsoleLoggerService.debug).toHaveBeenCalledTimes(1);
         expect(mockConsoleLoggerService.debug).toHaveBeenCalledWith(
           expect.objectContaining({

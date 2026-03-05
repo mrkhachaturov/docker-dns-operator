@@ -298,8 +298,12 @@ describe('DockerService', () => {
       const mockMxEntryRaw = validDnsMxEntry(DnsMxEntry);
       const mockNsEntryRaw = validDnsNsEntry(DnsNsEntry);
       // Create proper class instances with providers: ['cf'] to match normalizer output
-      const mockMxEntry = Object.assign(new DnsMxEntry(), mockMxEntryRaw, { providers: ['cf'] });
-      const mockNsEntry = Object.assign(new DnsNsEntry(), mockNsEntryRaw, { providers: ['cf'] });
+      const mockMxEntry = Object.assign(new DnsMxEntry(), mockMxEntryRaw, {
+        providers: ['cf'],
+      });
+      const mockNsEntry = Object.assign(new DnsNsEntry(), mockNsEntryRaw, {
+        providers: ['cf'],
+      });
       const mockMultiLabelAEntry = validDnsAEntry(DnsaEntry, {
         name: 'multilabel-a.test-domain.com',
       });
@@ -575,7 +579,9 @@ describe('DockerService', () => {
 
       it('should warn and ignore if id is present, but process other valid entries', () => {
         // arrange
-        const mockAEntryWithId = { ...mockAEntry } as unknown as DnsbaseEntry & { id: string };
+        const mockAEntryWithId = {
+          ...mockAEntry,
+        } as unknown as DnsbaseEntry & { id: string };
         mockAEntryWithId.id = 'cloudflare-id-value';
         const mockContainerInfo = mockContainerInfoBuilder
           .WithId('id-a')

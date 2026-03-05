@@ -72,7 +72,9 @@ export class AppService extends CronService {
    */
   initialize() {
     if (this.state === State.Initialized)
-      throw Error('AppService, initialize: Already initialized, but attempted to initialize again');
+      throw Error(
+        'AppService, initialize: Already initialized, but attempted to initialize again',
+      );
 
     this.providerRegistry.initialize();
     this.dockerService.initialize();
@@ -91,7 +93,8 @@ export class AppService extends CronService {
       );
 
     const containers = await this.dockerService.getContainers();
-    let allDockerEntries = await this.dockerService.extractDNSEntries(containers);
+    let allDockerEntries =
+      await this.dockerService.extractDNSEntries(containers);
 
     // DDNS resolution — provider-agnostic, applied before per-provider filtering
     if (this.ddnsService.isDdnsRequired(allDockerEntries)) {
@@ -123,29 +126,39 @@ export class AppService extends CronService {
     allReferencedKeys.delete('all'); // 'all' is a special token, not a provider key
     this.providerRegistry.resolve([...allReferencedKeys]); // emits warnings as side-effect
 
+    // eslint-disable-next-line no-restricted-syntax
     for (const provider of this.providerRegistry.getAll()) {
       // Prepare (e.g., CF fetches zone list)
+      // eslint-disable-next-line no-await-in-loop
       if (provider.prepareForJob) await provider.prepareForJob();
 
       // Filter entries targeting this provider
       const targeted = allDockerEntries.filter(
-        (e) => (e.providers ?? ['cf']).includes(provider.providerKey) ||
-                (e.providers ?? ['cf']).includes('all'),
+        (e) =>
+          (e.providers ?? ['cf']).includes(provider.providerKey) ||
+          (e.providers ?? ['cf']).includes('all'),
       );
 
       // Per-provider deduplication
-      const deduplicated = this.dedupeForProvider(targeted, provider.providerKey);
+      const deduplicated = this.dedupeForProvider(
+        targeted,
+        provider.providerKey,
+      );
 
       // Fetch current state from provider
+      // eslint-disable-next-line no-await-in-loop
       const providerRecords = await provider.getRecords();
 
       // Compute diff
       const diff = computeSetDifference(deduplicated, providerRecords);
 
       // Apply diff
+      // eslint-disable-next-line no-await-in-loop
       await Promise.all([
         ...diff.add.map((e) => provider.createEntry(e)),
-        ...diff.update.map(({ old, update }) => provider.updateEntry(old, update)),
+        ...diff.update.map(({ old, update }) =>
+          provider.updateEntry(old, update),
+        ),
         ...diff.delete.map((e) => provider.deleteEntry(e)),
       ]);
 
@@ -155,10 +168,14 @@ export class AppService extends CronService {
     }
   }
 
-  private dedupeForProvider(entries: DnsbaseEntry[], providerKey: string): DnsbaseEntry[] {
+  private dedupeForProvider(
+    entries: DnsbaseEntry[],
+    providerKey: string,
+  ): DnsbaseEntry[] {
     const seen = new Map<string, DnsbaseEntry>();
     const dupes = new Map<string, DnsbaseEntry[]>();
 
+    // eslint-disable-next-line no-restricted-syntax
     for (const entry of entries) {
       const key = `${providerKey}:${entry.type}:${entry.name}`;
       if (dupes.has(key)) {

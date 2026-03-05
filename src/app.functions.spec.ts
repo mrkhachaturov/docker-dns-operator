@@ -21,7 +21,9 @@ function makeProviderRecord(overrides: {
     id: overrides.id ?? 'test-id',
     name: overrides.name,
     type: overrides.type ?? DNSTypes.A,
-    get Key() { return `${this.type}:${this.name}`; },
+    get Key() {
+      return `${this.type}:${this.name}`;
+    },
     hasSameValue: jest.fn().mockReturnValue(overrides.sameValue ?? true),
     providerContext: { zoneId: overrides.zoneId ?? 'zone-1' },
   };
@@ -50,9 +52,21 @@ describe('AppFunctions', () => {
       ];
       const entriesCfToUpdate = [
         makeProviderRecord({ name: 'to-update-a', sameValue: false }),
-        makeProviderRecord({ name: 'to-update-cname', type: DNSTypes.CNAME, sameValue: false }),
-        makeProviderRecord({ name: 'to-update-mx', type: DNSTypes.MX, sameValue: false }),
-        makeProviderRecord({ name: 'to-update-ns', type: DNSTypes.NS, sameValue: false }),
+        makeProviderRecord({
+          name: 'to-update-cname',
+          type: DNSTypes.CNAME,
+          sameValue: false,
+        }),
+        makeProviderRecord({
+          name: 'to-update-mx',
+          type: DNSTypes.MX,
+          sameValue: false,
+        }),
+        makeProviderRecord({
+          name: 'to-update-ns',
+          type: DNSTypes.NS,
+          sameValue: false,
+        }),
       ];
       const entriesDockerUnchanged = [
         validDnsAEntry(DnsaEntry, { name: 'unchanged-a' }),
@@ -61,13 +75,37 @@ describe('AppFunctions', () => {
         validDnsNsEntry(DnsNsEntry, { name: 'unchanged-ns' }),
       ];
       const entriesCfUnchanged = [
-        makeProviderRecord({ id: 'unchanged-a-id', name: 'unchanged-a', sameValue: true }),
-        makeProviderRecord({ id: 'unchanged-cname-id', name: 'unchanged-cname', type: DNSTypes.CNAME, sameValue: true }),
-        makeProviderRecord({ id: 'unchanged-mx-id', name: 'unchanged-mx', type: DNSTypes.MX, sameValue: true }),
-        makeProviderRecord({ id: 'unchanged-ns-id', name: 'unchanged-ns', type: DNSTypes.NS, sameValue: true }),
+        makeProviderRecord({
+          id: 'unchanged-a-id',
+          name: 'unchanged-a',
+          sameValue: true,
+        }),
+        makeProviderRecord({
+          id: 'unchanged-cname-id',
+          name: 'unchanged-cname',
+          type: DNSTypes.CNAME,
+          sameValue: true,
+        }),
+        makeProviderRecord({
+          id: 'unchanged-mx-id',
+          name: 'unchanged-mx',
+          type: DNSTypes.MX,
+          sameValue: true,
+        }),
+        makeProviderRecord({
+          id: 'unchanged-ns-id',
+          name: 'unchanged-ns',
+          type: DNSTypes.NS,
+          sameValue: true,
+        }),
       ];
       const entriesCfToDelete = [
-        makeProviderRecord({ id: 'to-delete-id', name: 'to-delete', type: DNSTypes.CNAME, sameValue: true }),
+        makeProviderRecord({
+          id: 'to-delete-id',
+          name: 'to-delete',
+          type: DNSTypes.CNAME,
+          sameValue: true,
+        }),
         toDeleteUnsupported,
       ];
       // act
@@ -95,14 +133,18 @@ describe('AppFunctions', () => {
 
   describe('computeSetDifference (generic IProviderRecord)', () => {
     it('should compute add, update, delete, unchanged with generic provider records', () => {
-      const toAdd = [
-        validDnsAEntry(DnsaEntry, { name: 'new-entry' }),
-      ];
+      const toAdd = [validDnsAEntry(DnsaEntry, { name: 'new-entry' })];
       const toUpdateDocker = [validDnsAEntry(DnsaEntry, { name: 'update-me' })];
-      const toUpdateProvider = [makeProviderRecord({ name: 'update-me', sameValue: false })];
+      const toUpdateProvider = [
+        makeProviderRecord({ name: 'update-me', sameValue: false }),
+      ];
       const unchangedDocker = [validDnsAEntry(DnsaEntry, { name: 'keep-me' })];
-      const unchangedProvider = [makeProviderRecord({ name: 'keep-me', sameValue: true })];
-      const toDelete = [makeProviderRecord({ id: 'del-id', name: 'delete-me' })];
+      const unchangedProvider = [
+        makeProviderRecord({ name: 'keep-me', sameValue: true }),
+      ];
+      const toDelete = [
+        makeProviderRecord({ id: 'del-id', name: 'delete-me' }),
+      ];
 
       const result = computeSetDifference(
         [...toAdd, ...toUpdateDocker, ...unchangedDocker],

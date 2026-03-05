@@ -32,14 +32,28 @@ export class MikrotikFactory {
     return this.toBaseBody(entry);
   }
 
+  // eslint-disable-next-line class-methods-use-this
   private toBaseBody(entry: DnsbaseEntry): Record<string, unknown> {
-    const base: Record<string, unknown> = { name: entry.name, type: entry.type };
-    if (isDnsAEntry(entry)) { return { ...base, address: entry.address }; }
-    if (isDnsCnameEntry(entry)) { return { ...base, cname: entry.target }; }
-    if (isDnsMxEntry(entry)) {
-      return { ...base, 'mx-exchange': entry.server, 'mx-preference': String(entry.priority) };
+    const base: Record<string, unknown> = {
+      name: entry.name,
+      type: entry.type,
+    };
+    if (isDnsAEntry(entry)) {
+      return { ...base, address: entry.address };
     }
-    if (isDnsNsEntry(entry)) { return { ...base, ns: entry.server }; }
+    if (isDnsCnameEntry(entry)) {
+      return { ...base, cname: entry.target };
+    }
+    if (isDnsMxEntry(entry)) {
+      return {
+        ...base,
+        'mx-exchange': entry.server,
+        'mx-preference': String(entry.priority),
+      };
+    }
+    if (isDnsNsEntry(entry)) {
+      return { ...base, ns: entry.server };
+    }
     throw new Error(`MikrotikFactory: unsupported DNS type '${entry.type}'`);
   }
 }

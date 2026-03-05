@@ -26,8 +26,11 @@ import { ProviderRegistry } from './providers/provider-registry.service';
     DdnsService,
     {
       provide: ProviderRegistry,
-      useFactory: (cf: CloudFlareService, mt: MikrotikService, logger: ConsoleLoggerService) =>
-        new ProviderRegistry([cf, mt], logger),
+      useFactory: (
+        cf: CloudFlareService,
+        mt: MikrotikService,
+        logger: ConsoleLoggerService,
+      ) => new ProviderRegistry([cf, mt], logger),
       inject: [CloudFlareService, MikrotikService, ConsoleLoggerService],
     },
   ],

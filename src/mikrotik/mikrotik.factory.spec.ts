@@ -72,7 +72,9 @@ describe('MikrotikFactory', () => {
   it('throws for unsupported type', () => {
     const entry = new DnsaEntry();
     entry.type = 'AAAA' as any;
-    expect(() => sut.toCreateBody(entry, entryIdentifier, defaultTTLSeconds)).toThrow();
+    expect(() =>
+      sut.toCreateBody(entry, entryIdentifier, defaultTTLSeconds),
+    ).toThrow();
   });
 
   it('toUpdateBody does not include comment or ttl', () => {

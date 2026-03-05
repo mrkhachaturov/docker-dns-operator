@@ -24,7 +24,10 @@ function makeMockProvider(key: string): DeepMocked<IDnsProvider> {
   } as unknown as DeepMocked<IDnsProvider>;
 }
 
-function makeProviderRecord(name: string, type = DNSTypes.A): CloudflareProviderRecord {
+function makeProviderRecord(
+  name: string,
+  type = DNSTypes.A,
+): CloudflareProviderRecord {
   const r = new CloudflareProviderRecord();
   r.id = `${name}-id`;
   r.name = name;
@@ -52,7 +55,9 @@ describe('AppService', () => {
     sut = module.get<AppService>(AppService);
     mockDockerService = module.get(DockerService) as DeepMocked<DockerService>;
     mockDdnsService = module.get(DdnsService) as DeepMocked<DdnsService>;
-    mockProviderRegistry = module.get(ProviderRegistry) as DeepMocked<ProviderRegistry>;
+    mockProviderRegistry = module.get(
+      ProviderRegistry,
+    ) as DeepMocked<ProviderRegistry>;
 
     mockCfProvider = makeMockProvider('cf');
     mockProviderRegistry.getAll.mockReturnValue([mockCfProvider]);
@@ -120,7 +125,10 @@ describe('AppService', () => {
     });
 
     it('should call updateEntry for changed entries', async () => {
-      const entry = validDnsAEntry(DnsaEntry, { name: 'update.testdomain.com', address: '9.9.9.9' });
+      const entry = validDnsAEntry(DnsaEntry, {
+        name: 'update.testdomain.com',
+        address: '9.9.9.9',
+      });
       entry.providers = ['cf'];
       const existingRecord = makeProviderRecord('update.testdomain.com');
       // Make hasSameValue return false — different address
@@ -131,26 +139,38 @@ describe('AppService', () => {
       await sut.job();
 
       expect(mockCfProvider.updateEntry).toHaveBeenCalledTimes(1);
-      expect(mockCfProvider.updateEntry).toHaveBeenCalledWith(existingRecord, entry);
+      expect(mockCfProvider.updateEntry).toHaveBeenCalledWith(
+        existingRecord,
+        entry,
+      );
     });
 
     it('should filter entries to only those targeting a provider', async () => {
       const cfEntry = validDnsAEntry(DnsaEntry, { name: 'cf.testdomain.com' });
       cfEntry.providers = ['cf'];
-      const mikrotikEntry = validDnsAEntry(DnsaEntry, { name: 'mikrotik.testdomain.com' });
+      const mikrotikEntry = validDnsAEntry(DnsaEntry, {
+        name: 'mikrotik.testdomain.com',
+      });
       mikrotikEntry.providers = ['mikrotik'];
 
-      mockDockerService.extractDNSEntries.mockReturnValue([cfEntry, mikrotikEntry]);
+      mockDockerService.extractDNSEntries.mockReturnValue([
+        cfEntry,
+        mikrotikEntry,
+      ]);
 
       await sut.job();
 
       // cfProvider should only receive cfEntry, not mikrotikEntry
       expect(mockCfProvider.createEntry).toHaveBeenCalledWith(cfEntry);
-      expect(mockCfProvider.createEntry).not.toHaveBeenCalledWith(mikrotikEntry);
+      expect(mockCfProvider.createEntry).not.toHaveBeenCalledWith(
+        mikrotikEntry,
+      );
     });
 
     it('should include "all" entries for every provider', async () => {
-      const allEntry = validDnsAEntry(DnsaEntry, { name: 'all.testdomain.com' });
+      const allEntry = validDnsAEntry(DnsaEntry, {
+        name: 'all.testdomain.com',
+      });
       allEntry.providers = ['all'];
       mockDockerService.extractDNSEntries.mockReturnValue([allEntry]);
 
@@ -162,12 +182,17 @@ describe('AppService', () => {
     it('should warn and skip duplicates per provider', async () => {
       const entry1 = validDnsAEntry(DnsaEntry, { name: 'dupe.testdomain.com' });
       entry1.providers = ['cf'];
-      const entry2 = validDnsAEntry(DnsaEntry, { name: 'dupe.testdomain.com', address: '2.2.2.2' });
+      const entry2 = validDnsAEntry(DnsaEntry, {
+        name: 'dupe.testdomain.com',
+        address: '2.2.2.2',
+      });
       entry2.providers = ['cf'];
 
       mockDockerService.extractDNSEntries.mockReturnValue([entry1, entry2]);
 
-      const mockLogger = sut['loggerService'] as DeepMocked<ConsoleLoggerService>;
+      const mockLogger = sut[
+        'loggerService'
+      ] as DeepMocked<ConsoleLoggerService>;
 
       await sut.job();
 
@@ -179,7 +204,9 @@ describe('AppService', () => {
     });
 
     it('should propagate error from provider', async () => {
-      (mockCfProvider.prepareForJob as jest.Mock).mockRejectedValue(new Error('provider error'));
+      (mockCfProvider.prepareForJob as jest.Mock).mockRejectedValue(
+        new Error('provider error'),
+      );
       await expect(sut.job()).rejects.toThrow('provider error');
     });
   });

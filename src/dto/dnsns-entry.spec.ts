@@ -58,9 +58,7 @@ describe('DnsNsEntry', () => {
       },
     );
 
-    each([
-      [DnsNsEntry, 'different.com'],
-    ]).it(
+    each([[DnsNsEntry, 'different.com']]).it(
       'should not have the same value or identity (type: %p, server: %p)',
       (type, server) => {
         // arrange
@@ -76,9 +74,7 @@ describe('DnsNsEntry', () => {
       },
     );
 
-    each([
-      [DnsNsEntry, 'different.com'],
-    ]).it(
+    each([[DnsNsEntry, 'different.com']]).it(
       'should not have the same value, but same identity (type: %p, server: %p)',
       (type, server) => {
         // arrange

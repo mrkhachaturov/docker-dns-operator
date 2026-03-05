@@ -3,7 +3,8 @@
  * Example: 3661 → "1h1m1s"
  */
 export function secondsToMikrotikTTL(totalSeconds: number): string {
-  if (totalSeconds < 0) throw new Error(`Negative TTL not allowed: ${totalSeconds}`);
+  if (totalSeconds < 0)
+    throw new Error(`Negative TTL not allowed: ${totalSeconds}`);
 
   const days = Math.floor(totalSeconds / 86400);
   const remainder1 = totalSeconds % 86400;
@@ -37,7 +38,8 @@ export function mikrotikTTLToSeconds(ttl: string): number {
   if (!ttl) return 0;
 
   const matches = [...ttl.matchAll(TTL_REGEX)];
-  if (matches.length === 0) throw new Error(`Invalid MikroTik duration: '${ttl}'`);
+  if (matches.length === 0)
+    throw new Error(`Invalid MikroTik duration: '${ttl}'`);
 
   const reconstructed = matches.map((m) => m[0]).join('');
   if (reconstructed !== ttl.replace(/\s/g, '')) {
@@ -45,9 +47,11 @@ export function mikrotikTTLToSeconds(ttl: string): number {
   }
 
   let total = 0;
+  // eslint-disable-next-line no-restricted-syntax
   for (const [, valueStr, unitStr] of matches) {
     const value = parseFloat(valueStr);
-    if (value < 0) throw new Error(`Negative value in MikroTik duration: '${ttl}'`);
+    if (value < 0)
+      throw new Error(`Negative value in MikroTik duration: '${ttl}'`);
     total += value * UNIT_MAP[unitStr];
   }
 

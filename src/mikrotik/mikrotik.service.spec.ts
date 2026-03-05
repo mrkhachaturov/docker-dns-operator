@@ -1,7 +1,7 @@
-import { MikrotikService } from './mikrotik.service';
-import { ConsoleLoggerService } from '../logger.service';
 import { ConfigService } from '@nestjs/config';
 import { createMock, DeepMocked } from '@golevelup/ts-jest';
+import { MikrotikService } from './mikrotik.service';
+import { ConsoleLoggerService } from '../logger.service';
 import { DnsaEntry } from '../dto/dnsa-entry';
 import { DNSTypes } from '../dto/dnsbase-entry';
 
@@ -35,7 +35,9 @@ describe('MikrotikService', () => {
   beforeEach(() => {
     configService = createMock<ConfigService>();
     logger = createMock<ConsoleLoggerService>();
-    configService.get.mockImplementation((key) => baseEnv[key as keyof typeof baseEnv]);
+    configService.get.mockImplementation(
+      (key) => baseEnv[key as keyof typeof baseEnv],
+    );
     sut = new MikrotikService(configService, logger);
     mockFetch.mockReset();
   });
@@ -47,7 +49,9 @@ describe('MikrotikService', () => {
 
     it('returns false when MIKROTIK_BASEURL is missing', () => {
       configService.get.mockImplementation((key) =>
-        key === 'MIKROTIK_BASEURL' ? undefined : baseEnv[key as keyof typeof baseEnv],
+        key === 'MIKROTIK_BASEURL'
+          ? undefined
+          : baseEnv[key as keyof typeof baseEnv],
       );
       expect(sut.isConfigured()).toBe(false);
     });
@@ -61,7 +65,9 @@ describe('MikrotikService', () => {
 
     it('sets dispatcher when MIKROTIK_SKIP_TLS_VERIFY is true', () => {
       configService.get.mockImplementation((key) =>
-        key === 'MIKROTIK_SKIP_TLS_VERIFY' ? true : baseEnv[key as keyof typeof baseEnv],
+        key === 'MIKROTIK_SKIP_TLS_VERIFY'
+          ? true
+          : baseEnv[key as keyof typeof baseEnv],
       );
       sut.initialize();
       expect((sut as any).dispatcher).toBeDefined();
@@ -72,7 +78,9 @@ describe('MikrotikService', () => {
 
     it('passes dispatcher to fetch when set', async () => {
       configService.get.mockImplementation((key) =>
-        key === 'MIKROTIK_SKIP_TLS_VERIFY' ? true : baseEnv[key as keyof typeof baseEnv],
+        key === 'MIKROTIK_SKIP_TLS_VERIFY'
+          ? true
+          : baseEnv[key as keyof typeof baseEnv],
       );
       sut.initialize();
       mockFetch.mockResolvedValueOnce(makeJsonResponse([]));
@@ -88,9 +96,17 @@ describe('MikrotikService', () => {
     beforeEach(() => sut.initialize());
 
     it('fetches records filtered by ENTRY_IDENTIFIER comment', async () => {
-      mockFetch.mockResolvedValueOnce(makeJsonResponse([
-        { '.id': '*1', name: 'test.example.com', type: 'A', address: '1.2.3.4', comment: 'project:instance' },
-      ]));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse([
+          {
+            '.id': '*1',
+            name: 'test.example.com',
+            type: 'A',
+            address: '1.2.3.4',
+            comment: 'project:instance',
+          },
+        ]),
+      );
 
       const records = await sut.getRecords();
 
@@ -110,7 +126,9 @@ describe('MikrotikService', () => {
     });
 
     it('throws on HTTP error', async () => {
-      mockFetch.mockResolvedValueOnce(makeJsonResponse({ error: 'unauthorized' }, 401));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ error: 'unauthorized' }, 401),
+      );
       await expect(sut.getRecords()).rejects.toThrow('HTTP 401');
     });
   });
@@ -119,7 +137,9 @@ describe('MikrotikService', () => {
     beforeEach(() => sut.initialize());
 
     it('creates an A record with ownership comment and default TTL', async () => {
-      mockFetch.mockResolvedValueOnce(makeJsonResponse({ '.id': '*2', name: 'new.example.com' }));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ '.id': '*2', name: 'new.example.com' }),
+      );
 
       const entry = new DnsaEntry();
       entry.type = DNSTypes.A;
@@ -136,7 +156,9 @@ describe('MikrotikService', () => {
           body: expect.stringContaining('"address":"5.5.5.5"'),
         }),
       );
-      const body = JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string);
+      const body = JSON.parse(
+        (mockFetch.mock.calls[0][1] as RequestInit).body as string,
+      );
       expect(body.comment).toBe('project:instance');
       expect(body.ttl).toBe('1h'); // 3600s default
     });

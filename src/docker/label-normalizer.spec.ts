@@ -1,4 +1,7 @@
-import { normalizeProviders, normalizeProviderOptions } from './label-normalizer';
+import {
+  normalizeProviders,
+  normalizeProviderOptions,
+} from './label-normalizer';
 
 describe('normalizeProviders', () => {
   it('returns ["cf"] when field is absent (backward compat)', () => {
@@ -14,7 +17,10 @@ describe('normalizeProviders', () => {
   });
 
   it('normalizes providers array and lowercases', () => {
-    expect(normalizeProviders(undefined, ['CF', 'Mikrotik'])).toEqual(['cf', 'mikrotik']);
+    expect(normalizeProviders(undefined, ['CF', 'Mikrotik'])).toEqual([
+      'cf',
+      'mikrotik',
+    ]);
   });
 
   it('returns null for empty array (malformed)', () => {
@@ -40,20 +46,28 @@ describe('normalizeProviders', () => {
 
 describe('normalizeProviderOptions', () => {
   it('accepts boolean true', () => {
-    expect(normalizeProviderOptions({ proxy: true })).toEqual({ cf: { proxy: true } });
+    expect(normalizeProviderOptions({ proxy: true })).toEqual({
+      cf: { proxy: true },
+    });
   });
 
   it('accepts boolean false', () => {
-    expect(normalizeProviderOptions({ proxy: false })).toEqual({ cf: { proxy: false } });
+    expect(normalizeProviderOptions({ proxy: false })).toEqual({
+      cf: { proxy: false },
+    });
   });
 
   it('accepts string "true"', () => {
-    expect(normalizeProviderOptions({ proxy: 'true' })).toEqual({ cf: { proxy: true } });
+    expect(normalizeProviderOptions({ proxy: 'true' })).toEqual({
+      cf: { proxy: true },
+    });
   });
 
   it('accepts string "false"', () => {
     // Critical: Boolean("false") === true in JS — must parse explicitly
-    expect(normalizeProviderOptions({ proxy: 'false' })).toEqual({ cf: { proxy: false } });
+    expect(normalizeProviderOptions({ proxy: 'false' })).toEqual({
+      cf: { proxy: false },
+    });
   });
 
   it('returns null for invalid proxy type (number)', () => {
@@ -66,8 +80,9 @@ describe('normalizeProviderOptions', () => {
   });
 
   it('extracts proxy from nested providerOptions.cf.proxy', () => {
-    expect(normalizeProviderOptions({ providerOptions: { cf: { proxy: false } } }))
-      .toEqual({ cf: { proxy: false } });
+    expect(
+      normalizeProviderOptions({ providerOptions: { cf: { proxy: false } } }),
+    ).toEqual({ cf: { proxy: false } });
   });
 
   it('returns undefined when no proxy-related fields', () => {
@@ -75,7 +90,11 @@ describe('normalizeProviderOptions', () => {
   });
 
   it('nested providerOptions takes precedence over top-level proxy', () => {
-    expect(normalizeProviderOptions({ proxy: true, providerOptions: { cf: { proxy: false } } }))
-      .toEqual({ cf: { proxy: false } });
+    expect(
+      normalizeProviderOptions({
+        proxy: true,
+        providerOptions: { cf: { proxy: false } },
+      }),
+    ).toEqual({ cf: { proxy: false } });
   });
 });
