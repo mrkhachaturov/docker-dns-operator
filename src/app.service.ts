@@ -8,6 +8,7 @@ import { CloudFlareFactory } from './cloud-flare/cloud-flare.factory';
 import { DockerService } from './docker/docker.service';
 import { computeSetDifference } from './app.functions';
 import { DnsbaseEntry } from './dto/dnsbase-entry';
+import { IProviderRecord } from './providers/provider-record.interface';
 import { DnsaEntry, isDnsAEntry } from './dto/dnsa-entry';
 import { isDnsCnameEntry } from './dto/dnscname-entry';
 import { isDnsMxEntry } from './dto/dnsmx-entry';
@@ -148,7 +149,7 @@ export class AppService extends CronService {
     const cloudFlareEntries = Object.entries(zoneRecords).flatMap(
       ([zoneId, entries]) =>
         this.cloudFlareService.mapDNSEntries(zoneId, entries),
-    );
+    ) as unknown as IProviderRecord[];
     // compute the set differences
     const setDifference = computeSetDifference(
       dockerEntries,
@@ -168,15 +169,17 @@ export class AppService extends CronService {
         return this.cloudFlareService.createEntry(parameter);
       }),
       ...setDifference.update.map(async ({ old, update }) => {
+        const cfOld = old as unknown as { id: string; zoneId: string };
         const parameter = this.getCloudFlareRecordParameters(
-          old.zoneId,
+          cfOld.zoneId,
           update,
         );
-        return this.cloudFlareService.updateEntry(old.id, parameter);
+        return this.cloudFlareService.updateEntry(cfOld.id, parameter);
       }),
-      ...setDifference.delete.map(async (entry) =>
-        this.cloudFlareService.deleteEntry(entry.id, entry.zoneId),
-      ),
+      ...setDifference.delete.map(async (entry) => {
+        const cfEntry = entry as unknown as { id: string; zoneId: string };
+        return this.cloudFlareService.deleteEntry(cfEntry.id, cfEntry.zoneId);
+      }),
     ];
     await Promise.all(requests);
     this.loggerService.log(

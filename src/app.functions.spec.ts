@@ -13,15 +13,35 @@ import { DnsaCloudflareEntry } from './dto/dnsa-cloudflare-entry';
 import { DnsMxCloudflareEntry } from './dto/dnsmx-cloudflare-entry';
 import { DnsNsCloudflareEntry } from './dto/dnsns-cloudflare-entry';
 import { computeSetDifference } from './app.functions';
+import { IProviderRecord } from './providers/provider-record.interface';
+
+function makeProviderRecord(overrides: {
+  id?: string;
+  name: string;
+  type?: DNSTypes;
+  sameValue?: boolean;
+  zoneId?: string;
+}): IProviderRecord {
+  return {
+    id: overrides.id ?? 'test-id',
+    name: overrides.name,
+    type: overrides.type ?? DNSTypes.A,
+    get Key() { return `${this.type}:${this.name}`; },
+    hasSameValue: jest.fn().mockReturnValue(overrides.sameValue ?? true),
+    providerContext: { zoneId: overrides.zoneId ?? 'zone-1' },
+  };
+}
 
 describe('AppFunctions', () => {
   describe('computeSetDifference', () => {
     it('should compute the set difference', () => {
       // arrange
-      const toDeleteUnsupported = new DnsUnsupportedCloudFlareEntry();
-      toDeleteUnsupported.id = 'unsupported-id';
-      toDeleteUnsupported.name = 'unsupported';
-      toDeleteUnsupported.type = DNSTypes.Unsupported;
+      const toDeleteUnsupported = makeProviderRecord({
+        id: 'unsupported-id',
+        name: 'unsupported',
+        type: DNSTypes.Unsupported,
+        sameValue: true,
+      });
 
       const entriesDockerToAdd = [
         validDnsAEntry(DnsaEntry, { name: 'to-add-a' }),
@@ -34,16 +54,11 @@ describe('AppFunctions', () => {
         validDnsNsEntry(DnsNsEntry, { name: 'to-update-ns' }),
       ];
       const entriesCfToUpdate = [
-        validDnsAEntry(DnsaCloudflareEntry, { name: 'to-update-a' }),
-        validDnsCnameEntry(DnsCnameCloudflareEntry, {
-          name: 'to-update-cname',
-        }),
-        validDnsMxEntry(DnsMxCloudflareEntry, { name: 'to-update-mx' }),
-        validDnsNsEntry(DnsNsCloudflareEntry, { name: 'to-update-ns' }),
+        makeProviderRecord({ name: 'to-update-a', sameValue: false }),
+        makeProviderRecord({ name: 'to-update-cname', type: DNSTypes.CNAME, sameValue: false }),
+        makeProviderRecord({ name: 'to-update-mx', type: DNSTypes.MX, sameValue: false }),
+        makeProviderRecord({ name: 'to-update-ns', type: DNSTypes.NS, sameValue: false }),
       ];
-      [...entriesDockerToUpdate, ...entriesCfToUpdate].forEach((entry) =>
-        jest.spyOn(entry, 'hasSameValue').mockReturnValue(false),
-      );
       const entriesDockerUnchanged = [
         validDnsAEntry(DnsaEntry, { name: 'unchanged-a' }),
         validDnsCnameEntry(DnsCnameEntry, { name: 'unchanged-cname' }),
@@ -51,31 +66,13 @@ describe('AppFunctions', () => {
         validDnsNsEntry(DnsNsEntry, { name: 'unchanged-ns' }),
       ];
       const entriesCfUnchanged = [
-        validDnsAEntry(DnsaCloudflareEntry, {
-          id: 'unchanged-a-id',
-          name: 'unchanged-a',
-        }),
-        validDnsCnameEntry(DnsCnameCloudflareEntry, {
-          id: 'unchanged-cname-id',
-          name: 'unchanged-cname',
-        }),
-        validDnsMxEntry(DnsMxCloudflareEntry, {
-          id: 'unchanged-mx-id',
-          name: 'unchanged-mx',
-        }),
-        validDnsNsEntry(DnsNsCloudflareEntry, {
-          id: 'unchanged-ns-id',
-          name: 'unchanged-ns',
-        }),
+        makeProviderRecord({ id: 'unchanged-a-id', name: 'unchanged-a', sameValue: true }),
+        makeProviderRecord({ id: 'unchanged-cname-id', name: 'unchanged-cname', type: DNSTypes.CNAME, sameValue: true }),
+        makeProviderRecord({ id: 'unchanged-mx-id', name: 'unchanged-mx', type: DNSTypes.MX, sameValue: true }),
+        makeProviderRecord({ id: 'unchanged-ns-id', name: 'unchanged-ns', type: DNSTypes.NS, sameValue: true }),
       ];
-      [...entriesDockerUnchanged, ...entriesCfUnchanged].forEach((entry) =>
-        jest.spyOn(entry, 'hasSameValue').mockReturnValue(true),
-      );
       const entriesCfToDelete = [
-        validDnsCnameEntry(DnsCnameCloudflareEntry, {
-          id: 'to-delete-id',
-          name: 'to-delete',
-        }),
+        makeProviderRecord({ id: 'to-delete-id', name: 'to-delete', type: DNSTypes.CNAME, sameValue: true }),
         toDeleteUnsupported,
       ];
       // act
@@ -98,6 +95,31 @@ describe('AppFunctions', () => {
       ]);
       expect(result.delete).toEqual(entriesCfToDelete);
       expect(result.unchanged).toEqual(entriesCfUnchanged);
+    });
+  });
+
+  describe('computeSetDifference (generic IProviderRecord)', () => {
+    it('should compute add, update, delete, unchanged with generic provider records', () => {
+      const toAdd = [
+        validDnsAEntry(DnsaEntry, { name: 'new-entry' }),
+      ];
+      const toUpdateDocker = [validDnsAEntry(DnsaEntry, { name: 'update-me' })];
+      const toUpdateProvider = [makeProviderRecord({ name: 'update-me', sameValue: false })];
+      const unchangedDocker = [validDnsAEntry(DnsaEntry, { name: 'keep-me' })];
+      const unchangedProvider = [makeProviderRecord({ name: 'keep-me', sameValue: true })];
+      const toDelete = [makeProviderRecord({ id: 'del-id', name: 'delete-me' })];
+
+      const result = computeSetDifference(
+        [...toAdd, ...toUpdateDocker, ...unchangedDocker],
+        [...toUpdateProvider, ...unchangedProvider, ...toDelete],
+      );
+
+      expect(result.add).toEqual(toAdd);
+      expect(result.update).toHaveLength(1);
+      expect(result.update[0].old).toBe(toUpdateProvider[0]);
+      expect(result.update[0].update).toBe(toUpdateDocker[0]);
+      expect(result.delete).toEqual(toDelete);
+      expect(result.unchanged).toEqual(unchangedProvider);
     });
   });
 });

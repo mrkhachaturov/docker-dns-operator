@@ -1,84 +1,50 @@
-import { DnsbaseEntry, ICloudFlareEntry } from './dto/dnsbase-entry';
+import { DnsbaseEntry } from './dto/dnsbase-entry';
+import { IProviderRecord } from './providers/provider-record.interface';
 
-/**
- * Represents the DNS Entries set difference
- */
-export type SetDifference = {
-  unchanged: ICloudFlareEntry[];
+export type SetDifference<T extends IProviderRecord = IProviderRecord> = {
+  unchanged: T[];
   add: DnsbaseEntry[];
-  update: {
-    old: ICloudFlareEntry;
-    update: DnsbaseEntry;
-  }[];
-  delete: ICloudFlareEntry[];
+  update: { old: T; update: DnsbaseEntry }[];
+  delete: T[];
 };
 
-/**
- * Given a set of DNS entrie from docker and a set from cludflare.
- * Compares them to calculate the set difference.
- *
- * Reults in separate arrays for entries to be
- * - unchanged
- * - added
- * - updated
- * - deleted
- *
- * @param dockerEntries Entries from docker
- * @param cloudFlareEntries Entries from cloudflare
- * @returns {SetDifference} The set difference
- */
-export function computeSetDifference(
+export function computeSetDifference<T extends IProviderRecord>(
   dockerEntries: DnsbaseEntry[],
-  cloudFlareEntries: ICloudFlareEntry[],
-): SetDifference {
-  // build index from docker entries
-  const dockerEntryIndex = dockerEntries.reduce(
-    (previous, current) => {
-      const { Key } = current;
-      return { ...previous, [Key]: current };
-    },
-    {} as { [key: string]: DnsbaseEntry },
+  providerRecords: T[],
+): SetDifference<T> {
+  const dockerIndex = dockerEntries.reduce(
+    (acc, entry) => ({ ...acc, [entry.Key]: entry }),
+    {} as Record<string, DnsbaseEntry>,
   );
-  // build index of matching cf entries
-  const matchingIndex = cloudFlareEntries.reduce(
-    (previous, current) => {
-      const { Key } = current;
-      return {
-        ...previous,
-        [Key]: { cloudFlare: current, docker: dockerEntryIndex[Key] },
-      };
-    },
-    {} as {
-      [key: string]: {
-        docker: DnsbaseEntry;
-        cloudFlare: ICloudFlareEntry;
-      };
-    },
+
+  const matchIndex = providerRecords.reduce(
+    (acc, record) => ({
+      ...acc,
+      [record.Key]: { provider: record, docker: dockerIndex[record.Key] },
+    }),
+    {} as Record<string, { docker: DnsbaseEntry | undefined; provider: T }>,
   );
-  // build the result
-  const result: SetDifference = {
-    add: Object.entries(dockerEntryIndex)
-      .filter(([key]) => {
-        return matchingIndex[key] === undefined;
-      })
+
+  const result: SetDifference<T> = {
+    add: Object.entries(dockerIndex)
+      .filter(([key]) => matchIndex[key] === undefined)
       .map(([, value]) => value),
     update: [],
     delete: [],
     unchanged: [],
   };
-  // calculate update and delete
-  Object.entries(matchingIndex).forEach(([, { docker, cloudFlare }]) => {
-    // compute delete
-    if (docker === undefined && cloudFlare !== undefined) {
-      result.delete.push(cloudFlare);
+
+  Object.values(matchIndex).forEach(({ docker, provider }) => {
+    if (docker === undefined) {
+      result.delete.push(provider);
       return;
     }
-    // compute update
-    if (docker.hasSameValue(cloudFlare)) {
-      result.unchanged.push(cloudFlare);
+    if (provider.hasSameValue(docker)) {
+      result.unchanged.push(provider);
     } else {
-      result.update.push({ old: cloudFlare, update: docker });
+      result.update.push({ old: provider, update: docker });
     }
   });
+
   return result;
 }

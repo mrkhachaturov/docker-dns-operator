@@ -8,7 +8,8 @@ import { AppService, State } from './app.service';
 import { DockerService } from './docker/docker.service';
 import { CloudFlareService } from './cloud-flare/cloud-flare.service';
 import { CloudFlareFactory } from './cloud-flare/cloud-flare.factory';
-import { DnsbaseEntry, DNSTypes, ICloudFlareEntry } from './dto/dnsbase-entry';
+import { DnsbaseEntry, DNSTypes } from './dto/dnsbase-entry';
+import { IProviderRecord } from './providers/provider-record.interface';
 import { DnsBaseCloudflareEntry } from './dto/dnsbase-entry.spec';
 import { SetDifference, computeSetDifference } from './app.functions';
 import { DnsaCloudflareEntry } from './dto/dnsa-cloudflare-entry';
@@ -108,7 +109,7 @@ describe('AppService', () => {
         old: {
           zoneId: 'zone-2',
           id: 'record-id-1',
-        } as unknown as ICloudFlareEntry,
+        } as unknown as IProviderRecord,
         update: {
           id: 'record-id-1',
           name: 'updated-1-a',
@@ -119,7 +120,7 @@ describe('AppService', () => {
         old: {
           zoneId: 'zone-2',
           id: 'record-id-2',
-        } as unknown as ICloudFlareEntry,
+        } as unknown as IProviderRecord,
         update: {
           id: 'record-id-2',
           name: 'updated-2-cname',
@@ -130,7 +131,7 @@ describe('AppService', () => {
         old: {
           zoneId: 'zone-1',
           id: 'record-id-3',
-        } as unknown as ICloudFlareEntry,
+        } as unknown as IProviderRecord,
         update: {
           id: 'record-id-3',
           name: 'updated-3-mx',
@@ -141,7 +142,7 @@ describe('AppService', () => {
         old: {
           zoneId: 'zone-3',
           id: 'record-id-4',
-        } as unknown as ICloudFlareEntry,
+        } as unknown as IProviderRecord,
         update: {
           id: 'record-id-4',
           name: 'updated-4-ns',
@@ -152,8 +153,8 @@ describe('AppService', () => {
     delete: [
       { id: 'delete-1', name: 'delete-1' },
       { id: 'delete-2', name: 'delete-2' },
-    ] as unknown as ICloudFlareEntry[],
-    unchanged: ['unchanged-1'] as unknown as ICloudFlareEntry[],
+    ] as unknown as IProviderRecord[],
+    unchanged: ['unchanged-1'] as unknown as IProviderRecord[],
   };
   const mockCloudFlareServiceGetZoneForEntryValues = {
     [DNSTypes.A]: 'zone-2',
