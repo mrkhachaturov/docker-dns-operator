@@ -1,51 +1,45 @@
-<meta name="google-site-verification" content="BxFtjK97fs8vIbZk_fUjQ96iyJRTzRkYnOcCMpUl2sk" />
+# docker-external-dns (multi-provider fork)
 
-![project-url][test-badge]
-![project-url][coverage-badge]
-![codacy-url][codacy-badge]
+> **Fork of [timk153/docker-external-dns](https://github.com/timk153/docker-external-dns)**
+> This fork extends the original with **multi-provider support** (CloudFlare + MikroTik) and per-entry provider routing. Docker Swarm support is on the roadmap.
 
-[codacy-badge]: https://app.codacy.com/project/badge/Grade/d43ba19e75954648b5f79ce6db8e8cc3
-[codacy-url]: https://app.codacy.com/gh/timk153/docker-external-dns/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade
-[project-url]: https://github.com/timk153/docker-external-dns
-[test-badge]: https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Ftimk153%2F26bea053b867128f6f37f5aac0ddcf8b%2Fraw%2F32d61159849411189d88f349d141c28dac0cbbaf%2Fdocker-external-dns-junit-tests.json
-[coverage-badge]: https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Ftimk153%2F26bea053b867128f6f37f5aac0ddcf8b%2Fraw%2Fcaa38e5f9bd95657bd1f4f9ac76f5447b627600f%2Fdocker-external-dns-cobertura-coverage.json
+This project was originally inspired by:
+- https://github.com/kubernetes-sigs/external-dns
+- https://github.com/dntsk/extdns
 
-# Docker Compose external DNS (docker-external-dns)
+Built using the [Nest](https://github.com/nestjs/nest) framework (TypeScript).
 
-This project was inspired by:
-https://github.com/kubernetes-sigs/external-dns
-https://github.com/dntsk/extdns
+## What this fork adds
 
-It is broadly similar to [extdns](https://github.com/dntsk/extdns) in functionality, but expands upon it.
+| Feature | Upstream | This fork |
+|---------|----------|-----------|
+| CloudFlare provider | ✅ | ✅ |
+| MikroTik RouterOS provider | ❌ | ✅ |
+| Per-entry provider routing (`providers` label) | ❌ | ✅ |
+| Route one entry to multiple providers | ❌ | ✅ |
+| Docker Swarm support | ❌ | 🔜 planned |
 
-This project was built using:<br/>
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## What it does
 
-This project does the following:
-
-- Reads labels from containers sharing the same docker runtime.<br/>
-  The labels contain DNS information.
-- Optionally include stopped containers DNS entires
-- Synchronises those records to configured DNS providers
-  - CloudFlare
-  - MikroTik
-- Runs at a regular interval (like a CRON job but interval is only programmable in seconds)
-- Supports DDNS (ipv4 only)
+- Reads DNS labels from Docker containers sharing the same Docker runtime
+- Synchronises those records to one or more configured DNS providers
+  - **CloudFlare** — public DNS, supports A, CNAME, MX, NS, proxying
+  - **MikroTik RouterOS** — local DNS via REST API, supports A, CNAME, MX, NS
+- Each DNS entry declares which provider(s) it targets via a `providers` label field
+- Optionally includes stopped containers
+- Runs on a configurable interval (seconds)
+- Supports DDNS (IPv4)
 - Supports multiple instances with different configurations
-- Writes identification comments to determine which records it controls
-- Supports the following record types only:
-  - A
-  - CNAME
-  - MX
-  - NS
+- Tags managed records with an ownership comment to avoid touching unrelated entries
+- Supports DNS record types: A, CNAME, MX, NS
 
-**IMPORTANT** This project now supports multiple providers. At least one provider must be configured.
+At least one provider must be configured.
 
 # User guide
 
 ## TL;DR
 
-The project provides a Docker Compose external DNS container with provider-based routing. It currently supports CloudFlare and MikroTik, with DNS entry types A, CNAME, NS, and MX. Configuration is managed through environment variables and labels applied to Docker containers. Detailed examples for various configurations and DNS record types are provided in the [Examples](#examples) section. For more details on DNS record types, refer to the [DNS Entry Types](#dns-entry-types) section.
+Attach DNS labels to your Docker containers. This service reads those labels and keeps the configured DNS providers in sync — creating, updating, and deleting records automatically. It supports CloudFlare and MikroTik, with per-entry routing so each record goes only to the provider(s) you specify. See the [Examples](#examples) section for common configurations.
 
 ## Troubleshooting
 
