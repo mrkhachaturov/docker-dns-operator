@@ -51,7 +51,8 @@ function mapEntityToCloudFlare<T extends DnsbaseEntry>(
   content?: string,
 ) {
   if (isDnsAEntry(entity)) {
-    const { name, address, proxy } = entity;
+    const { name, address } = entity;
+    const proxy = entity.providerOptions?.cf?.proxy;
     return {
       zone_id,
       id,
@@ -63,7 +64,8 @@ function mapEntityToCloudFlare<T extends DnsbaseEntry>(
     } as ARecord;
   }
   if (isDnsCnameEntry(entity)) {
-    const { name, target, proxy } = entity;
+    const { name, target } = entity;
+    const proxy = entity.providerOptions?.cf?.proxy;
     return {
       zone_id,
       id,

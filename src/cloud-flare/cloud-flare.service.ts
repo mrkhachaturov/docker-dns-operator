@@ -12,12 +12,11 @@ import {
   RecordUpdateParams,
 } from 'cloudflare/resources/dns/records';
 import { ConsoleLoggerService } from '../logger.service';
-import { DnsaCloudflareEntry } from '../dto/dnsa-cloudflare-entry';
-import { DnsCnameCloudflareEntry } from '../dto/dnscname-cloudflare-entry';
-import { DnsMxCloudflareEntry } from '../dto/dnsmx-cloudflare-entry';
-import { DnsNsCloudflareEntry } from '../dto/dnsns-cloudflare-entry';
-import { DnsUnsupportedCloudFlareEntry } from '../dto/dnsunsupported-cloudflare-entry';
-import { DnsbaseEntry, DNSTypes, ICloudFlareEntry } from '../dto/dnsbase-entry';
+import { DnsbaseEntry, DNSTypes } from '../dto/dnsbase-entry';
+import { IProviderRecord } from '../providers/provider-record.interface';
+import { IDnsProvider } from '../providers/dns-provider.interface';
+import { CloudflareProviderRecord } from './cloudflare-provider-record';
+import { CloudFlareFactory } from './cloud-flare.factory';
 import { NestedError } from '../errors/nested-error';
 import { getLogClassDecorator } from '../utility.functions';
 
@@ -38,16 +37,28 @@ export enum State {
  */
 @LogDecorator()
 @Injectable()
-export class CloudFlareService {
+export class CloudFlareService implements IDnsProvider {
+  readonly providerKey = 'cf';
+
   private state: State = State.Uninitialized;
 
   private cloudFlare: Cloudflare;
 
+  private cachedZones: Zone[] | null = null;
+
   constructor(
+    private cloudFlareFactory: CloudFlareFactory,
     private configService: ConfigService,
     private loggerService: ConsoleLoggerService,
   ) {
     loggerPointer = this.loggerService;
+  }
+
+  /**
+   * Returns true if the CloudFlare API token is configured in the environment.
+   */
+  isConfigured(): boolean {
+    return !!(process.env.API_TOKEN || process.env.API_TOKEN_FILE);
   }
 
   /**
@@ -68,6 +79,35 @@ export class CloudFlareService {
     });
 
     this.state = State.Initialized;
+  }
+
+  /**
+   * Fetches and caches zones for use during the current sync job.
+   * @throws {Error} if no zones are returned from CloudFlare.
+   */
+  async prepareForJob(): Promise<void> {
+    this.cachedZones = await this.getZones();
+    if (this.cachedZones.length === 0) {
+      throw new Error(
+        'CloudFlareService, prepareForJob: No zones returned from CloudFlare. Check API Token has Zone access.',
+      );
+    }
+  }
+
+  /**
+   * Returns all DNS records managed by this CloudFlare instance.
+   * @throws {Error} if prepareForJob() has not been called.
+   */
+  async getRecords(): Promise<CloudflareProviderRecord[]> {
+    if (!this.cachedZones)
+      throw new Error('CloudFlareService: call prepareForJob() first');
+    const allRecords: CloudflareProviderRecord[] = [];
+    for (const zone of this.cachedZones) {
+      // eslint-disable-next-line no-await-in-loop
+      const raw = await this.getDNSEntries(zone.id);
+      allRecords.push(...this.mapDNSEntries(zone.id, raw));
+    }
+    return allRecords;
   }
 
   /**
@@ -193,85 +233,80 @@ export class CloudFlareService {
   }
 
   /**
-   * Maps the CloudFlare DNS Records to the common DnsBaseCloudflareEntry type
+   * Maps the CloudFlare DNS Records to CloudflareProviderRecord instances.
    * @param {string} zoneId ID of the CloudFlare Zone these records were loaded from
    * @param {Cloudflare.DNS.Record[]} entries DNS entries from CloudFlare
-   * @returns {ICloudFlareEntry[]} Entries transformed into DnsBaseCloudflareEntry entries
+   * @returns {CloudflareProviderRecord[]} Entries transformed into CloudflareProviderRecord instances
    */
   mapDNSEntries(
     zoneId: string,
     entries: Cloudflare.DNS.Record[],
-  ): ICloudFlareEntry[] {
+  ): CloudflareProviderRecord[] {
     return entries.map((cloudFlareEntry) => {
-      let result: ICloudFlareEntry;
+      const record = new CloudflareProviderRecord();
+      record.id = cloudFlareEntry.id as string;
+      record.name = cloudFlareEntry.name;
+      record.zoneId = zoneId;
+
       switch (cloudFlareEntry.type) {
         case 'A': {
           const { content, proxied } = cloudFlareEntry as ARecord;
-          const entry = new DnsaCloudflareEntry();
-          entry.address = content;
-          entry.providerOptions = { cf: { proxy: proxied as boolean } };
-          entry.type = DNSTypes.A;
-          result = entry;
+          record.address = content;
+          record.proxy = proxied as boolean;
+          record.type = DNSTypes.A;
           break;
         }
         case 'CNAME': {
           const { content, proxied } = cloudFlareEntry as CNAMERecord;
-          const entry = new DnsCnameCloudflareEntry();
-          entry.target = content as string;
-          entry.providerOptions = { cf: { proxy: proxied as boolean } };
-          entry.type = DNSTypes.CNAME;
-          result = entry;
+          record.target = content as string;
+          record.proxy = proxied as boolean;
+          record.type = DNSTypes.CNAME;
           break;
         }
         case 'MX': {
           const { content, priority } = cloudFlareEntry as MXRecord;
-          const entry = new DnsMxCloudflareEntry();
-          entry.server = content;
-          entry.priority = priority;
-          entry.type = DNSTypes.MX;
-          result = entry;
+          record.server = content;
+          record.priority = priority;
+          record.type = DNSTypes.MX;
           break;
         }
         case 'NS': {
           const { content } = cloudFlareEntry as NSRecord;
-          const entry = new DnsNsCloudflareEntry();
-          entry.server = content;
-          entry.type = DNSTypes.NS;
-          result = entry;
+          record.server = content;
+          record.type = DNSTypes.NS;
           break;
         }
         default: {
-          const entry = new DnsUnsupportedCloudFlareEntry();
-          entry.type = DNSTypes.Unsupported;
-          result = entry;
+          record.type = DNSTypes.Unsupported;
           this.loggerService
-            .warn(`CloudFlareService, mapDNSEntries: Unsupported entry with id ${cloudFlareEntry.id} found. 
+            .warn(`CloudFlareService, mapDNSEntries: Unsupported entry with id ${cloudFlareEntry.id} found.
             It will be DELETED. Do not add the tracking comment to other DNS entries in CloudFlare!`);
         }
       }
-      const { id, name } = cloudFlareEntry;
-      result.id = id as string;
-      result.name = name;
-      result.zoneId = zoneId;
-      return result;
+
+      return record;
     });
   }
 
   /**
-   * Creates an Entry in CloudFlare
-   * @param entry The entry to create
-   * @throws {NestedError} if CloudFlare errors creating the entry
+   * Creates a DNS entry in CloudFlare for the given DnsbaseEntry.
+   * Resolves the zone from cached zones. Logs and skips if no zone found.
    */
   @LogDecorator({ level: 'debug' })
-  async createEntry(
-    entry:
-      | RecordCreateParams.ARecord
-      | RecordCreateParams.CNAMERecord
-      | RecordCreateParams.MXRecord
-      | RecordCreateParams.NSRecord,
-  ): Promise<void> {
+  async createEntry(entry: DnsbaseEntry): Promise<void> {
+    const zoneResult = this.getZoneForEntry(this.cachedZones!, entry);
+    if (!zoneResult.isSuccessful || !zoneResult.zone) {
+      this.loggerService.warn(
+        `CloudFlareService, createEntry: no zone found for ${entry.name}, skipping`,
+      );
+      return;
+    }
+    const params = this.cloudFlareFactory.createOrUpdateParams(
+      zoneResult.zone.id,
+      entry,
+    );
     try {
-      await this.cloudFlare.dns.records.create(entry);
+      await this.cloudFlare.dns.records.create(params);
     } catch (error) {
       throw new NestedError(
         `CloudFlareService, createEntry: Cloudflare errored creating entry. (${JSON.stringify(entry)})`,
@@ -281,43 +316,40 @@ export class CloudFlareService {
   }
 
   /**
-   * Updates an entry in CloudFlare
-   * @param recordId The id of the record to update
-   * @param entry The entry to be updated
-   * @throws {NestedError} if CloudFlare errors updating the entry
+   * Updates an existing DNS record in CloudFlare.
+   * Uses providerContext.zoneId from the old record.
    */
   @LogDecorator({ level: 'debug' })
   async updateEntry(
-    recordId: string,
-    entry:
-      | RecordUpdateParams.ARecord
-      | RecordUpdateParams.CNAMERecord
-      | RecordUpdateParams.MXRecord
-      | RecordUpdateParams.NSRecord,
+    oldRecord: IProviderRecord,
+    desired: DnsbaseEntry,
   ): Promise<void> {
+    const { zoneId } = oldRecord.providerContext as { zoneId: string };
+    const params = this.cloudFlareFactory.createOrUpdateParams(zoneId, desired);
     try {
-      await this.cloudFlare.dns.records.update(recordId, entry);
+      await this.cloudFlare.dns.records.update(oldRecord.id, params);
     } catch (error) {
       throw new NestedError(
-        `CloudFlareService, createEntry: Cloudflare errored updating entry. (${JSON.stringify(entry)})`,
+        `CloudFlareService, createEntry: Cloudflare errored updating entry. (${JSON.stringify(desired)})`,
         error,
       );
     }
   }
 
   /**
-   * Deletes an entry in CloudFlare
-   * @param recordId Record id to be deleted
-   * @param zoneId Zone the record belongs to
-   * @throws {NestedError} if CloudFlare errors deleteing the entry
+   * Deletes a DNS record in CloudFlare.
+   * Uses providerContext.zoneId from the old record.
    */
   @LogDecorator({ level: 'debug' })
-  async deleteEntry(recordId: string, zoneId: string): Promise<void> {
+  async deleteEntry(oldRecord: IProviderRecord): Promise<void> {
+    const { zoneId } = oldRecord.providerContext as { zoneId: string };
     try {
-      await this.cloudFlare.dns.records.delete(recordId, { zone_id: zoneId });
+      await this.cloudFlare.dns.records.delete(oldRecord.id, {
+        zone_id: zoneId,
+      });
     } catch (error) {
       throw new NestedError(
-        `CloudFlareService, createEntry: Cloudflare errored deleting entry. (zone_id: ${zoneId}, dnsRecordId: ${recordId})`,
+        `CloudFlareService, createEntry: Cloudflare errored deleting entry. (zone_id: ${zoneId}, dnsRecordId: ${oldRecord.id})`,
         error,
       );
     }

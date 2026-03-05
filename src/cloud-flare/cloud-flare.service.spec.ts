@@ -42,13 +42,10 @@ import { validDnsAEntry } from '../dto/dnsa-entry.spec';
 import { validDnsCnameEntry } from '../dto/dnscname-entry.spec';
 import { validDnsMxEntry } from '../dto/dnsmx-entry.spec';
 import { validDnsNsEntry } from '../dto/dnsns-entry.spec';
-import { DnsUnsupportedCloudFlareEntry } from '../dto/dnsunsupported-cloudflare-entry';
 import { DNSTypes } from '../dto/dnsbase-entry';
-import { DnsaCloudflareEntry } from '../dto/dnsa-cloudflare-entry';
-import { DnsCnameCloudflareEntry } from '../dto/dnscname-cloudflare-entry';
-import { DnsMxCloudflareEntry } from '../dto/dnsmx-cloudflare-entry';
-import { DnsNsCloudflareEntry } from '../dto/dnsns-cloudflare-entry';
 import { CloudFlareService, State } from './cloud-flare.service';
+import { CloudFlareFactory } from './cloud-flare.factory';
+import { CloudflareProviderRecord } from './cloudflare-provider-record';
 import { NestedError } from '../errors/nested-error';
 
 jest.mock('cloudflare');
@@ -140,6 +137,7 @@ describe('CloudFlareService', () => {
   let sut: CloudFlareService;
   let mockConfigService: DeepMocked<ConfigService>;
   let mockConsoleLoggerService: DeepMocked<ConsoleLoggerService>;
+  let mockCloudFlareFactory: DeepMocked<CloudFlareFactory>;
   const mockConfigServiceGetValues = {
     API_TOKEN: 'api-token',
     ENTRY_IDENTIFIER: 'project-label:instance-id',
@@ -162,6 +160,10 @@ describe('CloudFlareService', () => {
     mockConfigService.get.mockImplementation(
       (property) => mockConfigServiceGetValues[property],
     );
+
+    mockCloudFlareFactory = module.get(
+      CloudFlareFactory,
+    ) as DeepMocked<CloudFlareFactory>;
   });
 
   it('should be defined', () => {
@@ -569,84 +571,69 @@ describe('CloudFlareService', () => {
     });
 
     describe('mapDNSEntries', () => {
-      // supported records
-      const mockDNSAEntry = validDnsAEntry(DnsaCloudflareEntry);
-      mockDNSAEntry.zoneId = paramZoneId;
-      mockDNSAEntry.providers = undefined;
-      const mockCloudFlareARecord = new CloudFlareDNSRecordBuilder<ARecord>()
-        .WithType('A')
-        .WithName(mockDNSAEntry.name)
-        .WithContent(mockDNSAEntry.address)
-        .WithProxied(mockDNSAEntry.providerOptions?.cf?.proxy ?? false)
-        .Build();
-      mockDNSAEntry.id = mockCloudFlareARecord.id as string;
-      const mockDNSCNAMEEntry = validDnsCnameEntry(DnsCnameCloudflareEntry);
-      mockDNSCNAMEEntry.zoneId = paramZoneId;
-      mockDNSCNAMEEntry.providers = undefined;
-      const mockCloudFlareCNAMERecord =
-        new CloudFlareDNSRecordBuilder<CNAMERecord>()
-          .WithType('CNAME')
-          .WithName(mockDNSCNAMEEntry.name)
-          .WithContent(mockDNSCNAMEEntry.target)
-          .WithProxied(mockDNSCNAMEEntry.providerOptions?.cf?.proxy ?? false)
-          .Build();
-      mockDNSCNAMEEntry.id = mockCloudFlareCNAMERecord.id as string;
-      const mockDNSMXEntry = validDnsMxEntry(DnsMxCloudflareEntry);
-      mockDNSMXEntry.zoneId = paramZoneId;
-      const mockCloudFlareMXRecord = new CloudFlareDNSRecordBuilder<MXRecord>()
-        .WithType('MX')
-        .WithName(mockDNSMXEntry.name)
-        .WithContent(mockDNSMXEntry.server)
-        .WithPriority(mockDNSMXEntry.priority)
-        .Build();
-      mockDNSMXEntry.id = mockCloudFlareMXRecord.id as string;
-      const mockDNSNSEntry = validDnsNsEntry(DnsNsCloudflareEntry);
-      mockDNSNSEntry.zoneId = paramZoneId;
-      const mockCloudFlareNSRecord = new CloudFlareDNSRecordBuilder<NSRecord>()
-        .WithType('NS')
-        .WithName(mockDNSNSEntry.name)
-        .WithContent(mockDNSNSEntry.server)
-        .Build();
-      mockDNSNSEntry.id = mockCloudFlareNSRecord.id as string;
+      it('should deserialize supported and unsupported records to CloudflareProviderRecord', () => {
+        // arrange — build CF raw records and expected CloudflareProviderRecord objects together
+        function makeRawAndExpected<T extends Record>(
+          typeId: string,
+          name: string,
+          opts: { content?: string; proxied?: boolean; priority?: number },
+        ): { raw: DeepMocked<T>; expected: CloudflareProviderRecord } {
+          const raw = new CloudFlareDNSRecordBuilder<T>()
+            .WithType(typeId)
+            .WithName(name)
+            .WithContent(opts.content ?? '')
+            .Build() as DeepMocked<T>;
+          if (opts.proxied !== undefined) (raw as any).proxied = opts.proxied;
+          if (opts.priority !== undefined) (raw as any).priority = opts.priority;
 
-      it('should deserialize successfully', () => {
-        // arrange
-        const mockDNSEntries: { id: string; name: string; type: DNSTypes }[] = [
-          mockDNSAEntry,
-          mockDNSCNAMEEntry,
-          mockDNSMXEntry,
-          mockDNSNSEntry,
-        ];
-        const mockCloudFlareEntries: DeepMocked<Record>[] = [
-          mockCloudFlareARecord,
-          mockCloudFlareCNAMERecord,
-          mockCloudFlareMXRecord,
-          mockCloudFlareNSRecord,
-        ];
+          const exp = new CloudflareProviderRecord();
+          exp.id = raw.id as string;
+          exp.name = name;
+          exp.zoneId = paramZoneId;
+          switch (typeId) {
+            case 'A':
+              exp.type = DNSTypes.A;
+              exp.address = opts.content;
+              exp.proxy = opts.proxied as boolean;
+              break;
+            case 'CNAME':
+              exp.type = DNSTypes.CNAME;
+              exp.target = opts.content;
+              exp.proxy = opts.proxied as boolean;
+              break;
+            case 'MX':
+              exp.type = DNSTypes.MX;
+              exp.server = opts.content;
+              exp.priority = opts.priority;
+              break;
+            case 'NS':
+              exp.type = DNSTypes.NS;
+              exp.server = opts.content;
+              break;
+            default:
+              exp.type = DNSTypes.Unsupported;
+          }
+          return { raw, expected: exp };
+        }
+
+        const { raw: rawA, expected: expA } = makeRawAndExpected<ARecord>('A', 'testdomain.com', { content: '8.8.8.8', proxied: false });
+        const { raw: rawCNAME, expected: expCNAME } = makeRawAndExpected<CNAMERecord>('CNAME', 'test.testdomain.com', { content: 'testdomain.com', proxied: false });
+        const { raw: rawMX, expected: expMX } = makeRawAndExpected<MXRecord>('MX', 'testdomain.com', { content: 'mx1.testdomain.com', priority: 50 });
+        const { raw: rawNS, expected: expNS } = makeRawAndExpected<NSRecord>('NS', 'testdomain.com', { content: 'ns1.testdomain.com' });
+
+        const mockCloudFlareEntries: DeepMocked<Record>[] = [rawA, rawCNAME, rawMX, rawNS];
+        const mockExpected: CloudflareProviderRecord[] = [expA, expCNAME, expMX, expNS];
         const warnMessages: string[] = [];
 
         const unsupportedEntryFactory = <T extends Record>(typeId: string) => {
-          const mockCloudFlareEntry = new CloudFlareDNSRecordBuilder<T>()
-            .WithType(typeId)
-            .WithName('unsupported')
-            .WithContent('to-be-ignored')
-            .Build();
-
-          const mockDNSEntry = new DnsUnsupportedCloudFlareEntry();
-          mockDNSEntry.id = mockCloudFlareEntry.id as string;
-          mockDNSEntry.name = mockCloudFlareEntry.name;
-          mockDNSEntry.type = DNSTypes.Unsupported;
-          mockDNSEntry.zoneId = paramZoneId;
-
-          mockCloudFlareEntries.push(mockCloudFlareEntry);
-          mockDNSEntries.push(mockDNSEntry);
+          const { raw, expected: exp } = makeRawAndExpected<T>(typeId, 'unsupported', { content: 'to-be-ignored' });
+          mockCloudFlareEntries.push(raw);
+          mockExpected.push(exp);
           warnMessages.push(
-            `CloudFlareService, mapDNSEntries: Unsupported entry with id ${mockCloudFlareEntry.id} found. 
-            It will be DELETED. Do not add the tracking comment to other DNS entries in CloudFlare!`,
+            `CloudFlareService, mapDNSEntries: Unsupported entry with id ${raw.id} found.\n            It will be DELETED. Do not add the tracking comment to other DNS entries in CloudFlare!`,
           );
         };
 
-        // create mocked unsupported entries
         unsupportedEntryFactory<AAAARecord>('AAAA');
         unsupportedEntryFactory<CAARecord>('CAA');
         unsupportedEntryFactory<CERTRecord>('CERT');
@@ -668,10 +655,8 @@ describe('CloudFlareService', () => {
         const result = sut.mapDNSEntries(paramZoneId, mockCloudFlareEntries);
 
         // assert
-        expect(result).toEqual(mockDNSEntries);
-        expect(mockConsoleLoggerService.warn).toHaveBeenCalledTimes(
-          warnMessages.length,
-        );
+        expect(result).toEqual(mockExpected);
+        expect(mockConsoleLoggerService.warn).toHaveBeenCalledTimes(warnMessages.length);
         warnMessages.forEach((message) => {
           expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(message);
         });
@@ -687,16 +672,33 @@ describe('CloudFlareService', () => {
     });
 
     describe('createEntry', () => {
+      const testZone = { id: paramZoneId, name: 'testdomain.com' } as Zone;
+
+      beforeEach(() => {
+        sut['cachedZones'] = [testZone];
+      });
+
       each([
-        { type: 'A' } as RecordCreateParams.ARecord,
-        { type: 'CNAME' } as RecordCreateParams.CNAMERecord,
-        { type: 'MX' } as RecordCreateParams.MXRecord,
-        { type: 'NS' } as RecordCreateParams.NSRecord,
+        validDnsAEntry(DnsaEntry),
+        validDnsCnameEntry(DnsCnameEntry),
+        validDnsMxEntry(DnsMxEntry),
+        validDnsNsEntry(DnsNsEntry),
       ]).it('should create DNS entry', async (paramEntry) => {
-        // act / assert
+        // arrange
+        const mockParams = { zone_id: paramZoneId } as RecordCreateParams;
+        mockCloudFlareFactory.createOrUpdateParams.mockReturnValue(mockParams);
+
+        // act
         await sut.createEntry(paramEntry);
+
+        // assert
+        expect(mockCloudFlareFactory.createOrUpdateParams).toHaveBeenCalledTimes(1);
+        expect(mockCloudFlareFactory.createOrUpdateParams).toHaveBeenCalledWith(
+          paramZoneId,
+          paramEntry,
+        );
         expect(mockRecords.create).toHaveBeenCalledTimes(1);
-        expect(mockRecords.create).toHaveBeenCalledWith(paramEntry);
+        expect(mockRecords.create).toHaveBeenCalledWith(mockParams);
         expect(mockConsoleLoggerService.debug).toHaveBeenCalledTimes(1);
         expect(mockConsoleLoggerService.debug).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -707,12 +709,25 @@ describe('CloudFlareService', () => {
         );
       });
 
+      it('should warn and skip if no zone found', async () => {
+        // arrange — no zone matching entry name
+        sut['cachedZones'] = [];
+        const entry = validDnsAEntry(DnsaEntry);
+
+        // act
+        await sut.createEntry(entry);
+
+        // assert
+        expect(mockCloudFlareFactory.createOrUpdateParams).not.toHaveBeenCalled();
+        expect(mockRecords.create).not.toHaveBeenCalled();
+        expect(mockConsoleLoggerService.warn).toHaveBeenCalled();
+      });
+
       it('should fail creating DNS entry', async () => {
         // arrange
-        const paramEntry = {
-          name: 'error-entry',
-          type: 'CNAME',
-        } as RecordCreateParams.CNAMERecord;
+        const paramEntry = validDnsAEntry(DnsaEntry);
+        const mockParams = { zone_id: paramZoneId } as RecordCreateParams;
+        mockCloudFlareFactory.createOrUpdateParams.mockReturnValue(mockParams);
         const error = new Error('CloudFlare error');
         const expected = new NestedError(
           `CloudFlareService, createEntry: Cloudflare errored creating entry. (${JSON.stringify(paramEntry)})`,
@@ -734,21 +749,33 @@ describe('CloudFlareService', () => {
     });
 
     describe('updateEntry', () => {
-      const paramEntryId = 'entry-id';
+      const oldRecord = new CloudflareProviderRecord();
+      oldRecord.id = 'entry-id';
+      oldRecord.type = DNSTypes.A;
+      oldRecord.name = 'testdomain.com';
+      oldRecord.zoneId = paramZoneId;
 
       each([
-        { type: 'A' } as RecordUpdateParams.ARecord,
-        { type: 'CNAME' } as RecordUpdateParams.CNAMERecord,
-        { type: 'MX' } as RecordUpdateParams.MXRecord,
-        { type: 'NS' } as RecordUpdateParams.NSRecord,
-      ]).it('should update DNS entry', async (paramEntry) => {
-        // act / assert
-        await sut.updateEntry(paramEntryId, paramEntry);
-        expect(mockRecords.update).toHaveBeenCalledTimes(1);
-        expect(mockRecords.update).toHaveBeenCalledWith(
-          paramEntryId,
-          paramEntry,
+        validDnsAEntry(DnsaEntry),
+        validDnsCnameEntry(DnsCnameEntry),
+        validDnsMxEntry(DnsMxEntry),
+        validDnsNsEntry(DnsNsEntry),
+      ]).it('should update DNS entry', async (desired) => {
+        // arrange
+        const mockParams = { zone_id: paramZoneId } as RecordUpdateParams;
+        mockCloudFlareFactory.createOrUpdateParams.mockReturnValue(mockParams);
+
+        // act
+        await sut.updateEntry(oldRecord, desired);
+
+        // assert
+        expect(mockCloudFlareFactory.createOrUpdateParams).toHaveBeenCalledTimes(1);
+        expect(mockCloudFlareFactory.createOrUpdateParams).toHaveBeenCalledWith(
+          paramZoneId,
+          desired,
         );
+        expect(mockRecords.update).toHaveBeenCalledTimes(1);
+        expect(mockRecords.update).toHaveBeenCalledWith(oldRecord.id, mockParams);
         expect(mockConsoleLoggerService.debug).toHaveBeenCalledTimes(1);
         expect(mockConsoleLoggerService.debug).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -761,19 +788,18 @@ describe('CloudFlareService', () => {
 
       it('should fail updating DNS entry', async () => {
         // arrange
-        const paramEntry = {
-          name: 'error-entry',
-          type: 'CNAME',
-        } as RecordUpdateParams.CNAMERecord;
+        const desired = validDnsAEntry(DnsaEntry);
+        const mockParams = { zone_id: paramZoneId } as RecordUpdateParams;
+        mockCloudFlareFactory.createOrUpdateParams.mockReturnValue(mockParams);
         const error = new Error('CloudFlare error');
         const expected = new NestedError(
-          `CloudFlareService, createEntry: Cloudflare errored updating entry. (${JSON.stringify(paramEntry)})`,
+          `CloudFlareService, createEntry: Cloudflare errored updating entry. (${JSON.stringify(desired)})`,
           error,
         );
         mockRecords.update.mockRejectedValue(error);
 
         // act / assert
-        await expect(sut.updateEntry(paramEntryId, paramEntry)).rejects.toThrow(
+        await expect(sut.updateEntry(oldRecord, desired)).rejects.toThrow(
           expected,
         );
         expect(mockConsoleLoggerService.error).toHaveBeenCalledTimes(1);
@@ -788,13 +814,19 @@ describe('CloudFlareService', () => {
     });
 
     describe('deleteEntry', () => {
-      const paramRecordId = 'record-id';
+      const paramRecord = new CloudflareProviderRecord();
+      paramRecord.id = 'record-id';
+      paramRecord.type = DNSTypes.A;
+      paramRecord.name = 'testdomain.com';
+      paramRecord.zoneId = paramZoneId;
 
       it('should delete DNS entry', async () => {
-        // act / assert
-        await sut.deleteEntry(paramRecordId, paramZoneId);
+        // act
+        await sut.deleteEntry(paramRecord);
+
+        // assert
         expect(mockRecords.delete).toHaveBeenCalledTimes(1);
-        expect(mockRecords.delete).toHaveBeenCalledWith(paramRecordId, {
+        expect(mockRecords.delete).toHaveBeenCalledWith(paramRecord.id, {
           zone_id: paramZoneId,
         });
         expect(mockConsoleLoggerService.debug).toHaveBeenCalledTimes(1);
@@ -811,15 +843,13 @@ describe('CloudFlareService', () => {
         // arrange
         const error = new Error('CloudFlare error');
         const expected = new NestedError(
-          `CloudFlareService, createEntry: Cloudflare errored deleting entry. (zone_id: ${paramZoneId}, dnsRecordId: ${paramRecordId})`,
+          `CloudFlareService, createEntry: Cloudflare errored deleting entry. (zone_id: ${paramZoneId}, dnsRecordId: ${paramRecord.id})`,
           error,
         );
         mockRecords.delete.mockRejectedValue(error);
 
         // act / assert
-        await expect(
-          sut.deleteEntry(paramRecordId, paramZoneId),
-        ).rejects.toThrow(expected);
+        await expect(sut.deleteEntry(paramRecord)).rejects.toThrow(expected);
         expect(mockConsoleLoggerService.error).toHaveBeenCalledTimes(1);
         expect(mockConsoleLoggerService.error).toHaveBeenCalledWith(
           expect.objectContaining({

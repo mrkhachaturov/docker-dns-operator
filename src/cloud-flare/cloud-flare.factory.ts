@@ -7,8 +7,12 @@ import { ConfigService } from '@nestjs/config';
 import { ConsoleLoggerService } from '../logger.service';
 import { DnsCnameEntry } from '../dto/dnscname-entry';
 import { DnsMxEntry } from '../dto/dnsmx-entry';
-import { DnsaEntry } from '../dto/dnsa-entry';
+import { DnsaEntry, isDnsAEntry } from '../dto/dnsa-entry';
 import { DnsNsEntry } from '../dto/dnsns-entry';
+import { DnsbaseEntry } from '../dto/dnsbase-entry';
+import { isDnsCnameEntry } from '../dto/dnscname-entry';
+import { isDnsMxEntry } from '../dto/dnsmx-entry';
+import { isDnsNsEntry } from '../dto/dnsns-entry';
 import { getLogClassDecorator } from '../utility.functions';
 
 let loggerPointer: ConsoleLoggerService;
@@ -117,5 +121,20 @@ export class CloudFlareFactory {
         infer: true,
       }),
     };
+  }
+
+  /**
+   * Dispatches to the correct createOrUpdate method based on entry type.
+   * @throws {Error} if the entry type is unsupported.
+   */
+  createOrUpdateParams(
+    zoneId: string,
+    entry: DnsbaseEntry,
+  ): RecordCreateParams | RecordUpdateParams {
+    if (isDnsAEntry(entry)) return this.createOrUpdateARecordParams(zoneId, entry);
+    if (isDnsCnameEntry(entry)) return this.createOrUpdateCNAMERecordParams(zoneId, entry);
+    if (isDnsMxEntry(entry)) return this.createOrUpdateMXRecordParams(zoneId, entry);
+    if (isDnsNsEntry(entry)) return this.createOrUpdateNSRecordParams(zoneId, entry);
+    throw new Error(`CloudFlareFactory: unsupported entry type ${entry.type}`);
   }
 }

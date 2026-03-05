@@ -1,18 +1,12 @@
 import { Injectable, LoggerService } from '@nestjs/common';
-import { Record } from 'cloudflare/resources/dns/records';
 import { ConfigService } from '@nestjs/config';
 import { isNumber } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { CloudFlareService } from './cloud-flare/cloud-flare.service';
-import { CloudFlareFactory } from './cloud-flare/cloud-flare.factory';
 import { DockerService } from './docker/docker.service';
 import { computeSetDifference } from './app.functions';
 import { DnsbaseEntry } from './dto/dnsbase-entry';
-import { IProviderRecord } from './providers/provider-record.interface';
 import { DnsaEntry, isDnsAEntry } from './dto/dnsa-entry';
-import { isDnsCnameEntry } from './dto/dnscname-entry';
-import { isDnsMxEntry } from './dto/dnsmx-entry';
-import { isDnsNsEntry } from './dto/dnsns-entry';
 import { getLogClassDecorator } from './utility.functions';
 import { ConsoleLoggerService } from './logger.service';
 import { CronService, State as CronState } from './cron/cron.service';
@@ -63,7 +57,6 @@ export class AppService extends CronService {
 
   constructor(
     private cloudFlareService: CloudFlareService,
-    private cloudFlareFactory: CloudFlareFactory,
     private dockerService: DockerService,
     private configService: ConfigService,
     private ddnsService: DdnsService,
@@ -96,41 +89,24 @@ export class AppService extends CronService {
         'AppService, synchronize: Not initialized, cannot synchronize. Call initialize first',
       );
 
-    // get cloudflare zones
-    const zones = await this.cloudFlareService.getZones();
-    if (zones.length === 0)
-      throw new Error(
-        'AppService, synchronize: No zones returned from CloudFlare. Check API Token has Zone access and you have zones registered to your account',
-      );
-    // for each zone, get the zones records
-    const zoneRecords = {} as { [key: string]: Record[] };
-    const zoneRecordPromises = zones.map(
-      (zone) =>
-        new Promise<void>((resolve, reject) => {
-          this.cloudFlareService
-            .getDNSEntries(zone.id)
-            .then((records) => {
-              zoneRecords[zone.id] = records;
-              resolve();
-            })
-            .catch((reason) => reject(reason));
-        }),
-    );
-    await Promise.all(zoneRecordPromises);
-    // get the docker containers
-    // This is done first as it could error the process and we should always exit from error as soon as possible.
-    // Zone records get processed after docker entries are loaded and processed.
+    // Prepare CloudFlare: fetch and cache zones
+    await this.cloudFlareService.prepareForJob!();
+
+    // Fetch all current CloudFlare records
+    const cloudFlareEntries = await this.cloudFlareService.getRecords!();
+
+    // Get docker containers and extract DNS entries
     const containers = await this.dockerService.getContainers();
-    // get the docker entries
     let dockerEntries = await this.dockerService.extractDNSEntries(containers);
-    // determine if DDNS is required
+
+    // Determine if DDNS is required
     if (this.ddnsService.isDdnsRequired(dockerEntries)) {
       if (this.ddnsService.getState() === CronState.Stopped)
         await this.ddnsService.start();
       const address = this.ddnsService.getIPAddress();
       if (address === undefined) {
         this.loggerService
-          .warn(`DDNS, IPAddress has yet to be fetched successfully. DDNS records have been filtered out. 
+          .warn(`DDNS, IPAddress has yet to be fetched successfully. DDNS records have been filtered out.
           They'll be added in automatically once an IPAddress has been fetched.`);
         dockerEntries = dockerEntries.filter(
           (entry) => !(isDnsAEntry(entry) && entry.address === 'DDNS'),
@@ -145,75 +121,25 @@ export class AppService extends CronService {
     } else if (this.ddnsService.getState() === CronState.Started)
       await this.ddnsService.stop();
 
-    // process the zone entries
-    const cloudFlareEntries = Object.entries(zoneRecords).flatMap(
-      ([zoneId, entries]) =>
-        this.cloudFlareService.mapDNSEntries(zoneId, entries),
-    ) as unknown as IProviderRecord[];
-    // compute the set differences
-    const setDifference = computeSetDifference(
-      dockerEntries,
-      cloudFlareEntries,
-    );
-    // prepare requests to add, update and delete
-    let addedZoneCount = 0;
+    // Compute set differences
+    const setDifference = computeSetDifference(dockerEntries, cloudFlareEntries);
+
+    // Apply changes
     const requests = [
-      ...setDifference.add.map(async (entry) => {
-        const zone = this.cloudFlareService.getZoneForEntry(zones, entry);
-        if (!zone.isSuccessful || !zone.zone) return Promise.reject;
-        addedZoneCount += 1;
-        const parameter = this.getCloudFlareRecordParameters(
-          zone.zone.id,
-          entry,
-        );
-        return this.cloudFlareService.createEntry(parameter);
-      }),
-      ...setDifference.update.map(async ({ old, update }) => {
-        const cfOld = old as unknown as { id: string; zoneId: string };
-        const parameter = this.getCloudFlareRecordParameters(
-          cfOld.zoneId,
-          update,
-        );
-        return this.cloudFlareService.updateEntry(cfOld.id, parameter);
-      }),
-      ...setDifference.delete.map(async (entry) => {
-        const cfEntry = entry as unknown as { id: string; zoneId: string };
-        return this.cloudFlareService.deleteEntry(cfEntry.id, cfEntry.zoneId);
-      }),
+      ...setDifference.add.map((entry) =>
+        this.cloudFlareService.createEntry(entry),
+      ),
+      ...setDifference.update.map(({ old, update }) =>
+        this.cloudFlareService.updateEntry(old, update),
+      ),
+      ...setDifference.delete.map((entry) =>
+        this.cloudFlareService.deleteEntry(entry),
+      ),
     ];
     await Promise.all(requests);
+
     this.loggerService.log(
-      `Synchronisation complete, entries changed: Added ${addedZoneCount}, Updated ${setDifference.update.length}, Deleted ${setDifference.delete.length}, Unchanged ${setDifference.unchanged.length}`,
-    );
-  }
-
-  /**
-   * Determines which factory method to invoke for creation of parameters.
-   * Invokes it and returns the result.
-   * @param {string} zoneId ID of the zone
-   * @param {DnsbaseEntry} entry DNS entry to get creation or update parameters for
-   * @returns Creation or Update parameters for Cloudflare
-   * @throws {Error} If type of Dns entry can't be determined or is unsupported
-   */
-  private getCloudFlareRecordParameters(zoneId: string, entry: DnsbaseEntry) {
-    if (isDnsAEntry(entry)) {
-      return this.cloudFlareFactory.createOrUpdateARecordParams(zoneId, entry);
-    }
-    if (isDnsCnameEntry(entry)) {
-      return this.cloudFlareFactory.createOrUpdateCNAMERecordParams(
-        zoneId,
-        entry,
-      );
-    }
-    if (isDnsMxEntry(entry)) {
-      return this.cloudFlareFactory.createOrUpdateMXRecordParams(zoneId, entry);
-    }
-    if (isDnsNsEntry(entry)) {
-      return this.cloudFlareFactory.createOrUpdateNSRecordParams(zoneId, entry);
-    }
-
-    throw new Error(
-      `AppService, getFactoryForRecordParameters: Unreachable error! No factory method available for Unsupported type. (type: ${entry.type})`,
+      `Synchronisation complete, entries changed: Added ${setDifference.add.length}, Updated ${setDifference.update.length}, Deleted ${setDifference.delete.length}, Unchanged ${setDifference.unchanged.length}`,
     );
   }
 }

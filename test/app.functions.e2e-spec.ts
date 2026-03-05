@@ -4,13 +4,36 @@ import { validDnsNsEntry } from '../src/dto/dnsns-entry.spec';
 import { DnsCnameEntry } from '../src/dto/dnscname-entry';
 import { DnsMxEntry } from '../src/dto/dnsmx-entry';
 import { DnsNsEntry } from '../src/dto/dnsns-entry';
-import { DnsCnameCloudflareEntry } from '../src/dto/dnscname-cloudflare-entry';
-import { DnsMxCloudflareEntry } from '../src/dto/dnsmx-cloudflare-entry';
-import { DnsNsCloudflareEntry } from '../src/dto/dnsns-cloudflare-entry';
 import { validDnsAEntry } from '../src/dto/dnsa-entry.spec';
-import { DnsaEntry } from '../src/dto/dnsa-entry';
-import { DnsaCloudflareEntry } from '../src/dto/dnsa-cloudflare-entry';
+import { DnsaEntry, isDnsAEntry } from '../src/dto/dnsa-entry';
+import { DnsbaseEntry } from '../src/dto/dnsbase-entry';
+import { isDnsCnameEntry } from '../src/dto/dnscname-entry';
+import { isDnsMxEntry } from '../src/dto/dnsmx-entry';
+import { isDnsNsEntry } from '../src/dto/dnsns-entry';
+import { CloudflareProviderRecord } from '../src/cloud-flare/cloudflare-provider-record';
 import { computeSetDifference } from '../src/app.functions';
+
+/** Build a CloudflareProviderRecord from a DnsbaseEntry for test purposes. */
+function toCFRecord(entry: DnsbaseEntry, zoneId = 'zone-1', id = 'test-id'): CloudflareProviderRecord {
+  const r = new CloudflareProviderRecord();
+  r.id = id;
+  r.name = entry.name;
+  r.type = entry.type;
+  r.zoneId = zoneId;
+  if (isDnsAEntry(entry)) {
+    r.address = entry.address;
+    r.proxy = entry.providerOptions?.cf?.proxy ?? false;
+  } else if (isDnsCnameEntry(entry)) {
+    r.target = entry.target;
+    r.proxy = entry.providerOptions?.cf?.proxy ?? false;
+  } else if (isDnsMxEntry(entry)) {
+    r.server = entry.server;
+    r.priority = entry.priority;
+  } else if (isDnsNsEntry(entry)) {
+    r.server = entry.server;
+  }
+  return r;
+}
 
 describe('AppFunctions (Integration)', () => {
   describe('computeSetDifference', () => {
@@ -40,22 +63,10 @@ describe('AppFunctions (Integration)', () => {
       ];
 
       const toUpdateCloudFlare = [
-        validDnsAEntry(DnsaCloudflareEntry, {
-          id: 'to-update-id',
-          name: 'to-update',
-        }),
-        validDnsCnameEntry(DnsCnameCloudflareEntry, {
-          id: 'to-update-id',
-          name: 'to-update',
-        }),
-        validDnsMxEntry(DnsMxCloudflareEntry, {
-          id: 'to-update-id',
-          name: 'to-update',
-        }),
-        validDnsNsEntry(DnsNsCloudflareEntry, {
-          id: 'to-update-id',
-          name: 'to-update',
-        }),
+        toCFRecord(validDnsAEntry(DnsaEntry, { name: 'to-update' }), 'zone-1', 'to-update-id'),
+        toCFRecord(validDnsCnameEntry(DnsCnameEntry, { name: 'to-update' }), 'zone-1', 'to-update-id'),
+        toCFRecord(validDnsMxEntry(DnsMxEntry, { name: 'to-update' }), 'zone-1', 'to-update-id'),
+        toCFRecord(validDnsNsEntry(DnsNsEntry, { name: 'to-update' }), 'zone-1', 'to-update-id'),
       ];
 
       const unchangedDocker = [
@@ -66,17 +77,14 @@ describe('AppFunctions (Integration)', () => {
       ];
 
       const unchangedCloudFlare = [
-        validDnsAEntry(DnsaCloudflareEntry, { name: 'unchanged' }),
-        validDnsCnameEntry(DnsCnameCloudflareEntry, { name: 'unchanged' }),
-        validDnsMxEntry(DnsMxCloudflareEntry, { name: 'unchanged' }),
-        validDnsNsEntry(DnsNsCloudflareEntry, { name: 'unchanged' }),
+        toCFRecord(validDnsAEntry(DnsaEntry, { name: 'unchanged' })),
+        toCFRecord(validDnsCnameEntry(DnsCnameEntry, { name: 'unchanged' })),
+        toCFRecord(validDnsMxEntry(DnsMxEntry, { name: 'unchanged' })),
+        toCFRecord(validDnsNsEntry(DnsNsEntry, { name: 'unchanged' })),
       ];
 
       const toDelete = [
-        validDnsAEntry(DnsaCloudflareEntry, {
-          id: 'to-delete-id',
-          name: 'to-delete',
-        }),
+        toCFRecord(validDnsAEntry(DnsaEntry, { name: 'to-delete' }), 'zone-1', 'to-delete-id'),
       ];
 
       // act / assert
