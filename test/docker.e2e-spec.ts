@@ -90,6 +90,18 @@ describe('DockerService (Integration)', () => {
     entryValues.Invalid = [validDnsAEntry(DnsaEntry)];
     entryValues.Invalid[0].name = 'not-an-fqdn';
 
+    // Label normalizer defaults to ['cf'] when no provider label is present.
+    // Set on expected values so toEqual matches the parsed output.
+    entryValues.A[0].providers = ['cf'];
+    entryValues.AMultiLabel[0].providers = ['cf'];
+    entryValues.CNAME[0].providers = ['cf'];
+    entryValues.Duplicate1[0].providers = ['cf'];
+    entryValues.Duplicate2[0].providers = ['cf'];
+    entryValues.MX[0].providers = ['cf'];
+    entryValues.NS[0].providers = ['cf'];
+    entryValues.MultiLabelSomeInvalid[0].providers = ['cf'];
+    entryValues.MultiLabelSomeInvalid[5].providers = ['cf'];
+
     containerInstances.network = await new Network().start();
 
     // NOTE! DNS suffix on WithName required as 'A' isn't a valid docker container name
@@ -299,15 +311,22 @@ describe('DockerService (Integration)', () => {
     await initialize();
 
     // act
+    // fetchedContainers is the PRESERVE_STOPPED=true result (10 containers).
+    // extractDNSEntries no longer deduplicates — that is AppService's responsibility.
+    // Order: Empty(skip), DNSInvalid(invalid), DNSDuplicate2, DNSNS, DNSMX,
+    //        DNSMultiLabel([0],[5] valid), DNSDuplicate1, DNSCNAME, DNSAMultiLabel, DNSA.
     const parsedContainers = sut.extractDNSEntries(fetchedContainers);
 
     // assert
-    expect(parsedContainers[0]).toEqual(entryValues.NS[0]);
-    expect(parsedContainers[1]).toEqual(entryValues.MX[0]);
-    expect(parsedContainers[2]).toEqual(entryValues.MultiLabelSomeInvalid[0]);
-    expect(parsedContainers[3]).toEqual(entryValues.MultiLabelSomeInvalid[5]);
-    expect(parsedContainers[4]).toEqual(entryValues.CNAME[0]);
-    expect(parsedContainers[5]).toEqual(entryValues.AMultiLabel[0]);
-    expect(parsedContainers[6]).toEqual(entryValues.A[0]);
+    expect(parsedContainers).toHaveLength(9);
+    expect(parsedContainers[0]).toEqual(entryValues.Duplicate2[0]);
+    expect(parsedContainers[1]).toEqual(entryValues.NS[0]);
+    expect(parsedContainers[2]).toEqual(entryValues.MX[0]);
+    expect(parsedContainers[3]).toEqual(entryValues.MultiLabelSomeInvalid[0]);
+    expect(parsedContainers[4]).toEqual(entryValues.MultiLabelSomeInvalid[5]);
+    expect(parsedContainers[5]).toEqual(entryValues.Duplicate1[0]);
+    expect(parsedContainers[6]).toEqual(entryValues.CNAME[0]);
+    expect(parsedContainers[7]).toEqual(entryValues.AMultiLabel[0]);
+    expect(parsedContainers[8]).toEqual(entryValues.A[0]);
   });
 });
