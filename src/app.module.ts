@@ -3,6 +3,8 @@ import { DockerService } from './docker/docker.service';
 import { DockerFactory } from './docker/docker.factory';
 import { CloudFlareService } from './cloud-flare/cloud-flare.service';
 import { CloudFlareFactory } from './cloud-flare/cloud-flare.factory';
+import { MikrotikService } from './mikrotik/mikrotik.service';
+import { MikrotikFactory } from './mikrotik/mikrotik.factory';
 import { AppService } from './app.service';
 import { ConsoleLoggerService } from './logger.service';
 import { DdnsService } from './ddns/ddns.service';
@@ -17,15 +19,16 @@ import { ProviderRegistry } from './providers/provider-registry.service';
     DockerFactory,
     CloudFlareService,
     CloudFlareFactory,
+    MikrotikService,
+    MikrotikFactory,
     AppService,
     ConsoleLoggerService,
     DdnsService,
     {
       provide: ProviderRegistry,
-      useFactory: (cfService: CloudFlareService, logger: ConsoleLoggerService) => {
-        return new ProviderRegistry([cfService], logger);
-      },
-      inject: [CloudFlareService, ConsoleLoggerService],
+      useFactory: (cf: CloudFlareService, mt: MikrotikService, logger: ConsoleLoggerService) =>
+        new ProviderRegistry([cf, mt], logger),
+      inject: [CloudFlareService, MikrotikService, ConsoleLoggerService],
     },
   ],
 })

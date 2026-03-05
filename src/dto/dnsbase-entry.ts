@@ -4,17 +4,6 @@ export interface IHasDnsType {
   type: DNSTypes;
 }
 
-/**
- * @deprecated Replaced by IProviderRecord. Will be removed when CloudFlare
- * provider is fully migrated to IDnsProvider in Task 7.
- */
-export interface ICloudFlareEntry extends IHasDnsType {
-  id: string;
-  zoneId: string;
-  name: string;
-  get Key(): string;
-  hasSameValue(otherEntry: DnsbaseEntry): boolean;
-}
 
 export enum DNSTypes {
   A = 'A',

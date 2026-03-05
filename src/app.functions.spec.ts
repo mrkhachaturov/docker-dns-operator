@@ -2,16 +2,11 @@ import { validDnsAEntry } from './dto/dnsa-entry.spec';
 import { DnsaEntry } from './dto/dnsa-entry';
 import { validDnsCnameEntry } from './dto/dnscname-entry.spec';
 import { DnsCnameEntry } from './dto/dnscname-entry';
-import { DnsCnameCloudflareEntry } from './dto/dnscname-cloudflare-entry';
 import { validDnsMxEntry } from './dto/dnsmx-entry.spec';
 import { DnsMxEntry } from './dto/dnsmx-entry';
 import { validDnsNsEntry } from './dto/dnsns-entry.spec';
 import { DnsNsEntry } from './dto/dnsns-entry';
-import { DnsUnsupportedCloudFlareEntry } from './dto/dnsunsupported-cloudflare-entry';
 import { DNSTypes } from './dto/dnsbase-entry';
-import { DnsaCloudflareEntry } from './dto/dnsa-cloudflare-entry';
-import { DnsMxCloudflareEntry } from './dto/dnsmx-cloudflare-entry';
-import { DnsNsCloudflareEntry } from './dto/dnsns-cloudflare-entry';
 import { computeSetDifference } from './app.functions';
 import { IProviderRecord } from './providers/provider-record.interface';
 

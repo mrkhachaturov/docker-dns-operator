@@ -2,14 +2,12 @@ import each from 'jest-each';
 import { validate } from 'class-validator';
 import { DNSTypes } from './dnsbase-entry';
 import { DnsMxEntry } from './dnsmx-entry';
-import { DnsMxCloudflareEntry } from './dnsmx-cloudflare-entry';
-
 /**
- * Returns a new valid DnsCanmeEntry.
+ * Returns a new valid DnsMxEntry.
  * Used by other test cases
  * @returns { DnsMxEntry } result
  */
-export function validDnsMxEntry<T extends DnsMxEntry | DnsMxCloudflareEntry>(
+export function validDnsMxEntry<T extends DnsMxEntry>(
   EntryType: new () => T,
   defaults?: Partial<T>,
 ) {
@@ -33,7 +31,7 @@ describe('DnsMxEntry', () => {
   });
 
   describe('hasSameValue', () => {
-    each([DnsMxEntry, DnsMxCloudflareEntry]).it(
+    each([DnsMxEntry]).it(
       'should have the same value, but different identity (type %p)',
       (type) => {
         // arrange
@@ -48,7 +46,7 @@ describe('DnsMxEntry', () => {
       },
     );
 
-    each([DnsMxEntry, DnsMxCloudflareEntry]).it(
+    each([DnsMxEntry]).it(
       'should have the same value and identity (type %p)',
       (type) => {
         // arrange
@@ -65,9 +63,6 @@ describe('DnsMxEntry', () => {
       [DnsMxEntry, 'different.com', undefined],
       [DnsMxEntry, undefined, 99],
       [DnsMxEntry, 'different.com', 99],
-      [DnsMxCloudflareEntry, 'different.com', undefined],
-      [DnsMxCloudflareEntry, undefined, 99],
-      [DnsMxCloudflareEntry, 'different.com', 99],
     ]).it(
       'should not have the same value or identity (type: %p, server: %p, priority: %p)',
       (type, server, priority) => {
@@ -89,9 +84,6 @@ describe('DnsMxEntry', () => {
       [DnsMxEntry, 'different.com', undefined],
       [DnsMxEntry, undefined, 99],
       [DnsMxEntry, 'different.com', 99],
-      [DnsMxCloudflareEntry, 'different.com', undefined],
-      [DnsMxCloudflareEntry, undefined, 99],
-      [DnsMxCloudflareEntry, 'different.com', 99],
     ]).it(
       'should not have the same value, but same identity (type: %p, server: %p, priority: %p)',
       (type, server, priority) => {

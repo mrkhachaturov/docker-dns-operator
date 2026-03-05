@@ -3,11 +3,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import Docker from 'dockerode';
 import { ConfigService } from '@nestjs/config';
 import each from 'jest-each';
-import { DnsUnsupportedCloudFlareEntry } from '../dto/dnsunsupported-cloudflare-entry';
 import { validDnsAEntry } from '../dto/dnsa-entry.spec';
 import { validDnsCnameEntry } from '../dto/dnscname-entry.spec';
 import { DnsbaseEntry, DNSTypes } from '../dto/dnsbase-entry';
-import { DnsaCloudflareEntry } from '../dto/dnsa-cloudflare-entry';
 import { DockerFactory } from './docker.factory';
 import { DockerService, States } from './docker.service';
 import { NestedError } from '../errors/nested-error';
@@ -421,7 +419,7 @@ describe('DockerService', () => {
         const mockUnsupportedEntry = {
           ...mockAEntry,
           type: DNSTypes.Unsupported,
-        } as unknown as DnsUnsupportedCloudFlareEntry;
+        } as unknown as DnsbaseEntry;
         const mockUnsupportedContainerInfo = mockContainerInfoBuilder
           .WithId('id-unsupported')
           .WithLabel(mockUnsupportedEntry)
@@ -577,7 +575,7 @@ describe('DockerService', () => {
 
       it('should warn and ignore if id is present, but process other valid entries', () => {
         // arrange
-        const mockAEntryWithId = { ...mockAEntry } as DnsaCloudflareEntry;
+        const mockAEntryWithId = { ...mockAEntry } as unknown as DnsbaseEntry & { id: string };
         mockAEntryWithId.id = 'cloudflare-id-value';
         const mockContainerInfo = mockContainerInfoBuilder
           .WithId('id-a')

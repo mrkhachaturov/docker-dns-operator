@@ -2,14 +2,12 @@ import each from 'jest-each';
 import { validate } from 'class-validator';
 import { DNSTypes } from './dnsbase-entry';
 import { DnsNsEntry } from './dnsns-entry';
-import { DnsNsCloudflareEntry } from './dnsns-cloudflare-entry';
-
 /**
  * Returns a new valid DnsNsEntry.
  * Used by other test cases
  * @returns { DnsNsEntry } result
  */
-export function validDnsNsEntry<T extends DnsNsEntry | DnsNsCloudflareEntry>(
+export function validDnsNsEntry<T extends DnsNsEntry>(
   EntryType: new () => T,
   defaults?: Partial<T>,
 ) {
@@ -32,7 +30,7 @@ describe('DnsNsEntry', () => {
   });
 
   describe('hasSameValue', () => {
-    each([DnsNsEntry, DnsNsCloudflareEntry]).it(
+    each([DnsNsEntry]).it(
       'should have the same value, but different identity (type %p)',
       (type) => {
         // arrange
@@ -47,7 +45,7 @@ describe('DnsNsEntry', () => {
       },
     );
 
-    each([DnsNsEntry, DnsNsCloudflareEntry]).it(
+    each([DnsNsEntry]).it(
       'should have the same value and identity (type %p)',
       (type) => {
         // arrange
@@ -62,7 +60,6 @@ describe('DnsNsEntry', () => {
 
     each([
       [DnsNsEntry, 'different.com'],
-      [DnsNsCloudflareEntry, 'different.com'],
     ]).it(
       'should not have the same value or identity (type: %p, server: %p)',
       (type, server) => {
@@ -81,7 +78,6 @@ describe('DnsNsEntry', () => {
 
     each([
       [DnsNsEntry, 'different.com'],
-      [DnsNsCloudflareEntry, 'different.com'],
     ]).it(
       'should not have the same value, but same identity (type: %p, server: %p)',
       (type, server) => {
