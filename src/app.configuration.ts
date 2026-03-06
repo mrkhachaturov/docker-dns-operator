@@ -26,6 +26,7 @@ export const validationSchema = Joi.object({
     .empty('')
     .default(60),
   PRESERVE_STOPPED: Joi.boolean().default(false),
+  DOCKER_SWARM_MODE: Joi.boolean().default(false),
   // CloudFlare — both optional at schema level; runtime check in CloudFlareService.isConfigured()
   API_TOKEN: Joi.string()
     .pattern(/^[A-Za-z0-9_-]+$/)
@@ -137,6 +138,7 @@ export interface IConfiguration {
   INSTANCE_ID: string;
   ENTRY_IDENTIFIER: string;
   PRESERVE_STOPPED: boolean;
+  DOCKER_SWARM_MODE: boolean;
   MIKROTIK_BASEURL?: string;
   MIKROTIK_USERNAME?: string;
   MIKROTIK_PASSWORD?: string;

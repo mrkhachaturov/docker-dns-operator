@@ -386,6 +386,7 @@ describe('App Configuration', () => {
     process.env.API_TOKEN = mockReadFileSyncValue;
     delete process.env.LOG_LEVEL;
     delete process.env.PRESERVE_STOPPED;
+    delete process.env.DOCKER_SWARM_MODE;
 
     // act
     const sut = await getSystemUnderTest();
@@ -401,6 +402,7 @@ describe('App Configuration', () => {
     ).toEqual(60);
     expect(sut.get('LOG_LEVEL', { infer: true })).toEqual('error');
     expect(sut.get('PRESERVE_STOPPED', { infer: true })).toBe(false);
+    expect(sut.get('DOCKER_SWARM_MODE', { infer: true })).toBe(false);
   });
 
   each(['', '     ']).it(
