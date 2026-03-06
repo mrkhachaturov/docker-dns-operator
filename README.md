@@ -1,7 +1,7 @@
 # docker-external-dns (multi-provider fork)
 
 > **Fork of [timk153/docker-external-dns](https://github.com/timk153/docker-external-dns)**
-> This fork extends the original with **multi-provider support** (CloudFlare + MikroTik) and per-entry provider routing. Docker Swarm support is on the roadmap.
+> This fork extends the original with **multi-provider support** (CloudFlare + MikroTik), per-entry provider routing, and **Docker Swarm support**.
 
 This project was originally inspired by:
 - https://github.com/kubernetes-sigs/external-dns
@@ -17,11 +17,11 @@ Built using the [Nest](https://github.com/nestjs/nest) framework (TypeScript).
 | MikroTik RouterOS provider | ❌ | ✅ |
 | Per-entry provider routing (`providers` label) | ❌ | ✅ |
 | Route one entry to multiple providers | ❌ | ✅ |
-| Docker Swarm support | ❌ | 🔜 planned |
+| Docker Swarm support | ❌ | ✅ |
 
 ## What it does
 
-- Reads DNS labels from Docker containers sharing the same Docker runtime
+- Reads DNS labels from Docker containers or Swarm services sharing the same Docker runtime
 - Synchronises those records to one or more configured DNS providers
   - **CloudFlare** — public DNS, supports A, CNAME, MX, NS, proxying
   - **MikroTik RouterOS** — local DNS via REST API, supports A, CNAME, MX, NS
@@ -75,6 +75,7 @@ Detailed examples are available in the [Examples](#examples) section.
 | EXECUTION_FREQUENCY_SECONDS      | 60                          | How frequently the CRON job should execute to detect changes. Default is every 60 seconds. Undefined or empty uses the default. Minimum is every 1 second. There is no maximum. This must be an integer.                                                                                                                                                                                                                                                    |
 | DDNS_EXECUTION_FREQUENCY_MINUTES | 60                          | Determines how frequently the DDNS Service checks for a new public IP address. This setting only applies if you're using DDNS otherwise the service will not be started.                                                                                                                                                                                                                                                                                    |
 | PRESERVE_STOPPED                 | false                       | Determines if DNS entries for stopped containers are synchronised to the DNS server. `false` doesn't synchronise, meaning containers which are stopped will have their DNS entries removed. `true` means stopped containers won't have their entries removed. Removed containers will always have their DNS entries removed.                                                                                                                                |
+| DOCKER_SWARM_MODE                | false                       | Set to `true` to discover DNS entries from Docker Swarm services instead of containers. Labels must be set via `deploy.labels`. `PRESERVE_STOPPED` has no effect in Swarm mode — all services are always returned. |
 | API_TOKEN                        |                             | Optional. CloudFlare provider is enabled when API_TOKEN or API_TOKEN_FILE is set.<br/><br/>Your API token from Cloudflare. Must be granted Zone.Zone read and Zone.DNS edit.<br/><br/><span style="color: red; font-weight:bold">IMPORTANT</span> Use of this property is insecure as your API_TOKEN will be in plain text. It is recommended you use API_TOKEN_FILE. Use at your own risk.                                                                |
 | API_TOKEN_FILE                   |                             | Optional. CloudFlare provider is enabled when API_TOKEN or API_TOKEN_FILE is set.<br/><br/>Secure way to share your Cloudflare API Token with the project. Recommended approach for Docker Swarm. Compatible with Docker Compose (but less secure).<br/><br/>Read Docker Compose docs for more information: [Docker Compose Secrets](https://docs.docker.com/compose/use-secrets/)                                                                         |
 | MIKROTIK_BASEURL                 |                             | Optional. MikroTik provider is enabled when MIKROTIK_BASEURL, MIKROTIK_USERNAME and MIKROTIK_PASSWORD are all set.<br/><br/>Base URL of RouterOS REST API endpoint, for example: https://192.168.1.1                                                                                                                                                                                     |
@@ -750,3 +751,29 @@ services:
 ```
 
 Explanation: The single A record is created on both CloudFlare and MikroTik. Useful when you want internal DNS to mirror public DNS for split-horizon setups.
+
+### Docker Swarm
+
+Set `DOCKER_SWARM_MODE=true` to enable Swarm service discovery.
+
+DNS labels must be set at the **service** level using `deploy.labels`, not the top-level `labels` key:
+
+```yaml
+version: "3.8"
+services:
+  docker-compose-external-dns:
+    image: 'mrkhachaturov/docker-external-dns:latest'
+    environment:
+      - API_TOKEN=<your cloudflare api token>
+      - DOCKER_SWARM_MODE=true
+    volumes:
+      - '/var/run/docker.sock:/var/run/docker.sock:ro'
+
+  myapp:
+    image: nginx
+    deploy:
+      labels:
+        - 'docker-compose-external-dns:1=[{ "type": "A", "name": "myapp.example.com", "address": "1.2.3.4" }]'
+```
+
+> **Note:** `PRESERVE_STOPPED` has no effect in Swarm mode. All services are always returned.
