@@ -305,6 +305,74 @@ describe('DockerService (Integration)', () => {
     });
   });
 
+  describe('getSources — swarm mode (real Docker Swarm)', () => {
+    const dockerode = new Dockerode();
+    const swarmLabel = 'docker-compose-external-dns:1';
+    let createdServiceId: string | undefined;
+    let swarmInitiatedByTest = false;
+    const serviceName = `dns-swarm-e2e-test-${Date.now()}`;
+
+    beforeAll(async () => {
+      try {
+        await dockerode.swarmInit({ ListenAddr: '0.0.0.0:2377' });
+        swarmInitiatedByTest = true;
+      } catch (err: any) {
+        if (!err?.message?.toLowerCase().includes('already')) throw err;
+      }
+    });
+
+    afterAll(async () => {
+      delete process.env.DOCKER_SWARM_MODE;
+
+      if (createdServiceId) {
+        const service = dockerode.getService(createdServiceId);
+        await service.remove();
+        createdServiceId = undefined;
+      }
+      if (swarmInitiatedByTest) {
+        await dockerode.swarmLeave({ force: true });
+      }
+    });
+
+    it('should discover swarm services via getSources() with label filter', async () => {
+      // arrange — create a service with the DNS label
+      const entry = validDnsAEntry(DnsaEntry, { name: 'swarm.testdomain.com' });
+      entry.providers = ['cf'];
+
+      const serviceSpec = {
+        Name: serviceName,
+        Labels: { [swarmLabel]: JSON.stringify([entry]) },
+        TaskTemplate: {
+          ContainerSpec: {
+            Image: 'busybox:latest',
+            Command: ['sleep', '3600'],
+          },
+        },
+        Mode: { Replicated: { Replicas: 0 } },
+      };
+      const created = await dockerode.createService(serviceSpec);
+      createdServiceId = created.ID ?? (created as any).id;
+
+      // act — init DockerService in swarm mode and call getSources()
+      process.env.DOCKER_SWARM_MODE = 'true';
+      await initialize();
+
+      const sources = await sut.getSources();
+
+      // assert — our service appears with the right label
+      const match = sources.find((s) => s.Id === createdServiceId);
+      expect(match).toBeDefined();
+      expect(match?.Labels[swarmLabel]).toBeDefined();
+
+      // also verify extractDNSEntries works end-to-end
+      const entries = sut.extractDNSEntries(
+        sources.filter((s) => s.Id === createdServiceId),
+      );
+      expect(entries).toHaveLength(1);
+      expect(entries[0].name).toBe('swarm.testdomain.com');
+    });
+  });
+
   it('should parse the listed containers, skipping the invalid and empty ones', async () => {
     // arrange
     process.env.PRESERVE_STOPPED = 'false';
