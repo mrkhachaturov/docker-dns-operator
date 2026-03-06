@@ -92,7 +92,7 @@ export class AppService extends CronService {
         'AppService, synchronize: Not initialized, cannot synchronize. Call initialize first',
       );
 
-    const containers = await this.dockerService.getContainers();
+    const containers = await this.dockerService.getSources();
     let allDockerEntries =
       await this.dockerService.extractDNSEntries(containers);
 

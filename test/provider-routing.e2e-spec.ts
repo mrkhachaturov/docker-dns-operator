@@ -122,7 +122,7 @@ describe('AppService — provider routing (e2e)', () => {
 
   it('entry with providers=["cf"] is only synced to CloudFlare', async () => {
     const cfEntry = makeEntry('cf-only.testdomain.com', ['cf']);
-    mockDockerService.getContainers.mockResolvedValue([]);
+    mockDockerService.getSources.mockResolvedValue([]);
     (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
       cfEntry,
     ]);
@@ -140,7 +140,7 @@ describe('AppService — provider routing (e2e)', () => {
 
   it('entry with providers=["mikrotik"] is only synced to MikroTik', async () => {
     const mtEntry = makeEntry('mikrotik-only.testdomain.com', ['mikrotik']);
-    mockDockerService.getContainers.mockResolvedValue([]);
+    mockDockerService.getSources.mockResolvedValue([]);
     (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
       mtEntry,
     ]);
@@ -163,7 +163,7 @@ describe('AppService — provider routing (e2e)', () => {
 
   it('entry with providers=["cf","mikrotik"] is synced to both', async () => {
     const bothEntry = makeEntry('both.testdomain.com', ['cf', 'mikrotik']);
-    mockDockerService.getContainers.mockResolvedValue([]);
+    mockDockerService.getSources.mockResolvedValue([]);
     (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
       bothEntry,
     ]);
@@ -185,7 +185,7 @@ describe('AppService — provider routing (e2e)', () => {
       name: 'default.testdomain.com',
     });
     defaultEntry.providers = undefined;
-    mockDockerService.getContainers.mockResolvedValue([]);
+    mockDockerService.getSources.mockResolvedValue([]);
     (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
       defaultEntry,
     ]);
@@ -201,7 +201,7 @@ describe('AppService — provider routing (e2e)', () => {
 
   it('entry with providers=["all"] is synced to both CF and MikroTik', async () => {
     const allEntry = makeEntry('all.testdomain.com', ['all']);
-    mockDockerService.getContainers.mockResolvedValue([]);
+    mockDockerService.getSources.mockResolvedValue([]);
     (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
       allEntry,
     ]);

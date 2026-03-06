@@ -86,7 +86,7 @@ describe('AppService', () => {
   describe('job', () => {
     beforeEach(() => {
       sut['state'] = State.Initialized;
-      mockDockerService.getContainers.mockResolvedValue([]);
+      mockDockerService.getSources.mockResolvedValue([]);
       mockDockerService.extractDNSEntries.mockReturnValue([]);
     });
 
