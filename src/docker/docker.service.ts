@@ -18,6 +18,7 @@ import {
   normalizeProviders,
   normalizeProviderOptions,
 } from './label-normalizer';
+import { DockerSource } from './docker-source';
 
 let loggerPointer: LoggerService;
 const LogDecorator = getLogClassDecorator(() => loggerPointer);
@@ -46,6 +47,8 @@ export class DockerService {
   private dockerLabel: string;
 
   private preserveStopped: boolean;
+
+  private swarmMode: boolean;
 
   private state = States.Unintialized;
 
@@ -83,7 +86,67 @@ export class DockerService {
     this.preserveStopped = this.configService.get('PRESERVE_STOPPED', {
       infer: true,
     }) as boolean;
+    this.swarmMode = this.configService.get('DOCKER_SWARM_MODE', {
+      infer: true,
+    }) as boolean;
+
+    if (this.swarmMode && this.preserveStopped) {
+      this.loggerService.warn(
+        'DockerService, initialize: PRESERVE_STOPPED has no effect in DOCKER_SWARM_MODE',
+      );
+    }
+
     this.state = States.Initialized;
+  }
+
+  /**
+   * Returns all sources (containers or swarm services) that have the DNS label.
+   * In container mode: calls listContainers.
+   * In swarm mode: calls listServices and maps each to DockerSource.
+   * @returns Promise resolving to DockerSource array
+   * @throws {Error} If service hasn't been initialized
+   * @throws {NestedError} If docker throws an error
+   */
+  async getSources(): Promise<DockerSource[]> {
+    if (this.state !== States.Initialized)
+      throw new Error(
+        'DockerService, getSources: not initialized, must call initialize',
+      );
+
+    try {
+      if (!this.swarmMode) {
+        return await this.docker.listContainers({
+          all: this.preserveStopped,
+          filters: JSON.stringify({ label: [this.dockerLabel] }),
+        });
+      }
+
+      // Swarm mode: listServices uses a raw object filter (NOT JSON.stringify).
+      const services = await this.docker.listServices({
+        filters: { label: [this.dockerLabel] },
+      });
+
+      // Only use Spec.Labels (set by deploy.labels in compose).
+      const sources: DockerSource[] = [];
+      for (const service of services) {
+        const labels = service.Spec?.Labels;
+
+        if (!labels) {
+          this.loggerService.warn(
+            `DockerService, getSources: service ${service.ID} has no labels, skipping`,
+          );
+          continue;
+        }
+
+        sources.push({ Id: service.ID, Labels: labels });
+      }
+      return sources;
+    } catch (error) {
+      throw new NestedError(
+        'DockerService, getSources: Failed getting sources',
+        error,
+      );
+    }
   }
 
   /**
@@ -114,40 +177,40 @@ export class DockerService {
   /**
    * Contains behavior to deserialize the labels on the containers.
    * Converts to appropriate type and validates
-   * @param {Docker.ContainerInfo[]} containers containers with labels to deserialize
+   * @param {DockerSource[]} sources sources with labels to deserialize
    * @returns {DnsbaseEntry[]} deserialized labels
    * @throws {Error} If serivce hasn't been initialized
    */
   @LogDecorator({ level: 'debug' })
-  extractDNSEntries(containers: Docker.ContainerInfo[]): DnsbaseEntry[] {
+  extractDNSEntries(sources: DockerSource[]): DnsbaseEntry[] {
     if (this.state !== States.Initialized)
       throw new Error(
         'DockerService, extractDNSEntries: not initialized, must call initialize',
       );
 
     const allEntries: DnsbaseEntry[] = [];
-    containers.forEach((current) => {
+    sources.forEach((source) => {
       try {
         // try to parse the JSON
         const entries = JSON.parse(
-          current.Labels[this.dockerLabel],
+          source.Labels[this.dockerLabel],
         ) as DnsBaseCloudflareEntry[];
         if (!Array.isArray(entries)) {
           this.loggerService.warn(
-            `DockerService, extractDNSEntries: container with id ${current.Id} has an unrecognised shape, check the values`,
+            `DockerService, extractDNSEntries: source with id ${source.Id} has an unrecognised shape, check the values`,
           );
           return;
         }
         if (entries.length === 0) {
           this.loggerService.warn(
-            `DockerService, extractDNSEntries: container with id ${current.Id} has empty array for a label and has been ignored`,
+            `DockerService, extractDNSEntries: source with id ${source.Id} has empty array for a label and has been ignored`,
           );
           return;
         }
         entries.forEach((entry) => {
           if (entry.id !== undefined) {
             this.loggerService.warn(
-              `DockerService, extractDNSEntries: container with id ${current.Id} has 'id' within it's JSON label, please remove it`,
+              `DockerService, extractDNSEntries: source with id ${source.Id} has 'id' within it's JSON label, please remove it`,
             );
             return;
           }
@@ -161,7 +224,7 @@ export class DockerService {
           );
           if (providers === null) {
             this.loggerService.warn(
-              `DockerService, extractDNSEntries: container ${current.Id} has malformed providers field, entry skipped`,
+              `DockerService, extractDNSEntries: source ${source.Id} has malformed providers field, entry skipped`,
             );
             return;
           }
@@ -170,7 +233,7 @@ export class DockerService {
           const providerOptions = normalizeProviderOptions(rawEntry);
           if (providerOptions === null) {
             this.loggerService.warn(
-              `DockerService, extractDNSEntries: container ${current.Id} has malformed proxy field, entry skipped`,
+              `DockerService, extractDNSEntries: source ${source.Id} has malformed proxy field, entry skipped`,
             );
             return;
           }
@@ -217,12 +280,12 @@ export class DockerService {
               break;
             case DNSTypes.Unsupported:
               this.loggerService.warn(
-                `DockerService, extractDNSEntries: container with id ${current.Id} is using 'Unsupported' type, it will be ignored`,
+                `DockerService, extractDNSEntries: source with id ${source.Id} is using 'Unsupported' type, it will be ignored`,
               );
               return;
             default:
               this.loggerService.warn(
-                `DockerService, extractDNSEntries: container with id ${current.Id} has an unrecognised shape, check the values`,
+                `DockerService, extractDNSEntries: source with id ${source.Id} has an unrecognised shape, check the values`,
               );
               return;
           }
@@ -231,7 +294,7 @@ export class DockerService {
           // warn and ignore if any errors
           if (errors.length !== 0) {
             this.loggerService.warn(
-              `DockerService, extractDNSEntries: container with id ${current.Id} has validation errors`,
+              `DockerService, extractDNSEntries: source with id ${source.Id} has validation errors`,
               errors,
             );
             return;
@@ -241,7 +304,7 @@ export class DockerService {
       } catch (error) {
         // failed to parse the JSON
         this.loggerService.warn(
-          `DockerService, extractDNSEntries: container with id ${current.Id} has a non JSON formatted label`,
+          `DockerService, extractDNSEntries: source with id ${source.Id} has a non JSON formatted label`,
         );
       }
     });
