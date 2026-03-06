@@ -68,6 +68,7 @@ describe('DockerService', () => {
   const mockConfigServiceGetValue = {
     ENTRY_IDENTIFIER: 'project-label:instance-id',
     PRESERVE_STOPPED: false,
+    DOCKER_SWARM_MODE: false,
   };
   let expectedDockerLabel = '';
   let expectedPreserveStopped = false;
@@ -94,6 +95,7 @@ describe('DockerService', () => {
     mockDockerFactoryGetValue.listContainers.mockResolvedValue(
       mockDockerListContainersValue,
     );
+    mockDockerFactoryGetValue.listServices.mockResolvedValue([]);
 
     mockDockerFactory = module.get<DockerFactory>(
       DockerFactory,
@@ -133,15 +135,19 @@ describe('DockerService', () => {
       // assert
       expect(mockDockerFactory.get).toHaveBeenCalledTimes(1);
       expect(sut['docker']).toBe(mockDockerFactoryGetValue);
-      expect(mockConfigService.get).toHaveBeenCalledTimes(2);
+      expect(mockConfigService.get).toHaveBeenCalledTimes(3);
       expect(mockConfigService.get).toHaveBeenCalledWith('ENTRY_IDENTIFIER', {
         infer: true,
       });
       expect(mockConfigService.get).toHaveBeenCalledWith('PRESERVE_STOPPED', {
         infer: true,
       });
+      expect(mockConfigService.get).toHaveBeenCalledWith('DOCKER_SWARM_MODE', {
+        infer: true,
+      });
       expect(sut['dockerLabel']).toEqual(expectedDockerLabel);
       expect(sut['preserveStopped']).toEqual(expectedPreserveStopped);
+      expect(sut['swarmMode']).toEqual(false);
       expect(sut['state']).toBe(States.Initialized);
       expect(mockConsoleLoggerService.verbose).toHaveBeenCalledTimes(1);
       expect(mockConsoleLoggerService.verbose).toHaveBeenCalledWith(
@@ -210,9 +216,10 @@ describe('DockerService', () => {
       sut['docker'] = mockDockerFactoryGetValue;
       sut['dockerLabel'] = expectedDockerLabel;
       sut['preserveStopped'] = expectedPreserveStopped;
+      sut['swarmMode'] = false;
     });
 
-    describe('getContainers', () => {
+    describe('getSources (container mode)', () => {
       each([true, false]).it(
         'should return docker containers and filter by label (PRESERVE_STOPPED: %p)',
         async (preserveStopped) => {
@@ -220,7 +227,7 @@ describe('DockerService', () => {
           sut['preserveStopped'] = preserveStopped;
 
           // act
-          const result = await sut.getContainers();
+          const result = await sut.getSources();
 
           // assert
           expect(result).toBe(mockDockerListContainersValue);
@@ -237,7 +244,7 @@ describe('DockerService', () => {
           expect(mockConsoleLoggerService.verbose).toHaveBeenCalledWith(
             expect.objectContaining({
               level: 'trace',
-              method: 'getContainers',
+              method: 'getSources',
               service: 'DockerService',
               params: '[]',
             }),
@@ -245,24 +252,24 @@ describe('DockerService', () => {
         },
       );
 
-      it('should error if getContainers errors', async () => {
+      it('should error if getSources errors', async () => {
         // arrange
-        const getContainersError = new Error('error');
+        const getSourcesError = new Error('error');
         const error = new NestedError(
-          'DockerService, getContainers: Failed getting containers',
-          getContainersError,
+          'DockerService, getSources: Failed getting sources',
+          getSourcesError,
         );
         mockDockerFactoryGetValue.listContainers.mockRejectedValueOnce(
-          getContainersError,
+          getSourcesError,
         );
 
         // act / assert
-        await expect(async () => sut.getContainers()).rejects.toThrow(error);
+        await expect(async () => sut.getSources()).rejects.toThrow(error);
         expect(mockConsoleLoggerService.error).toHaveBeenCalledTimes(1);
         expect(mockConsoleLoggerService.error).toHaveBeenCalledWith(
           expect.objectContaining({
             level: 'error',
-            method: 'getContainers',
+            method: 'getSources',
             service: 'DockerService',
             params: '[]',
           }),
@@ -273,19 +280,100 @@ describe('DockerService', () => {
         // arrange
         sut['state'] = States.Unintialized;
         const error = new Error(
-          'DockerService, getContainers: not initialized, must call initialize',
+          'DockerService, getSources: not initialized, must call initialize',
         );
 
         // act / assert
-        await expect(async () => sut.getContainers()).rejects.toThrow(error);
+        await expect(async () => sut.getSources()).rejects.toThrow(error);
         expect(mockConsoleLoggerService.error).toHaveBeenCalledTimes(1);
         expect(mockConsoleLoggerService.error).toHaveBeenCalledWith(
           expect.objectContaining({
             level: 'error',
-            method: 'getContainers',
+            method: 'getSources',
             service: 'DockerService',
             params: '[]',
           }),
+        );
+      });
+    });
+
+    describe('getSources (swarm mode)', () => {
+      const mockServiceId = 'service-abc123';
+      const mockLabels = { [expectedDockerLabel]: '[]' };
+
+      beforeEach(() => {
+        sut['swarmMode'] = true;
+      });
+
+      it('should call listServices with raw object filter and map to DockerSource', async () => {
+        // arrange
+        const mockService = createMock<Docker.Service>();
+        mockService.ID = mockServiceId;
+        mockService.Spec = { Labels: mockLabels } as any;
+        mockDockerFactoryGetValue.listServices.mockResolvedValueOnce([
+          mockService,
+        ]);
+
+        // act
+        const result = await sut.getSources();
+
+        // assert
+        expect(result).toEqual([{ Id: mockServiceId, Labels: mockLabels }]);
+        expect(mockDockerFactoryGetValue.listServices).toHaveBeenCalledWith({
+          filters: { label: [expectedDockerLabel] },
+        });
+        expect(mockDockerFactoryGetValue.listContainers).not.toHaveBeenCalled();
+      });
+
+      it('should warn and skip service if Spec.Labels is absent', async () => {
+        // arrange
+        const mockService = createMock<Docker.Service>();
+        mockService.ID = mockServiceId;
+        mockService.Spec = {} as any;
+        mockDockerFactoryGetValue.listServices.mockResolvedValueOnce([
+          mockService,
+        ]);
+
+        // act
+        const result = await sut.getSources();
+
+        // assert
+        expect(result).toEqual([]);
+        expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
+          `DockerService, getSources: service ${mockServiceId} has no labels, skipping`,
+        );
+      });
+
+      it('should throw NestedError if listServices throws', async () => {
+        // arrange
+        const serviceError = new Error('swarm error');
+        const error = new NestedError(
+          'DockerService, getSources: Failed getting sources',
+          serviceError,
+        );
+        mockDockerFactoryGetValue.listServices.mockRejectedValueOnce(
+          serviceError,
+        );
+
+        // act / assert
+        await expect(async () => sut.getSources()).rejects.toThrow(error);
+      });
+
+      it('should warn if PRESERVE_STOPPED is also true during initialize', () => {
+        // arrange
+        mockConfigService.get.mockImplementation((key) => {
+          if (key === 'DOCKER_SWARM_MODE') return true;
+          if (key === 'PRESERVE_STOPPED') return true;
+          return mockConfigServiceGetValue[key];
+        });
+        sut['state'] = States.Unintialized;
+
+        // act
+        sut.initialize();
+
+        // assert
+        expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
+          'DockerService, initialize: PRESERVE_STOPPED has no effect in DOCKER_SWARM_MODE',
         );
       });
     });
@@ -436,7 +524,7 @@ describe('DockerService', () => {
         ]);
         expect(mockConsoleLoggerService.warn).toHaveBeenCalledTimes(1);
         expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
-          `DockerService, extractDNSEntries: container with id ${mockUnsupportedContainerInfo.Id} is using 'Unsupported' type, it will be ignored`,
+          `DockerService, extractDNSEntries: source with id ${mockUnsupportedContainerInfo.Id} is using 'Unsupported' type, it will be ignored`,
         );
       });
 
@@ -456,7 +544,7 @@ describe('DockerService', () => {
           expect(result).toStrictEqual(createMockContainersDefaultValidResult);
           expect(mockConsoleLoggerService.warn).toHaveBeenCalledTimes(1);
           expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
-            `DockerService, extractDNSEntries: container with id ${mockContainerInfo.Id} has a non JSON formatted label`,
+            `DockerService, extractDNSEntries: source with id ${mockContainerInfo.Id} has a non JSON formatted label`,
           );
         },
       );
@@ -488,7 +576,7 @@ describe('DockerService', () => {
           expect(result).toStrictEqual(createMockContainersDefaultValidResult);
           expect(mockConsoleLoggerService.warn).toHaveBeenCalledTimes(1);
           expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
-            `DockerService, extractDNSEntries: container with id ${mockContainerInfo.Id} has an unrecognised shape, check the values`,
+            `DockerService, extractDNSEntries: source with id ${mockContainerInfo.Id} has an unrecognised shape, check the values`,
           );
         },
       );
@@ -509,7 +597,7 @@ describe('DockerService', () => {
           expect(result).toStrictEqual(createMockContainersDefaultValidResult);
           expect(mockConsoleLoggerService.warn).toHaveBeenCalledTimes(1);
           expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
-            `DockerService, extractDNSEntries: container with id ${mockContainerInfo.Id} has empty array for a label and has been ignored`,
+            `DockerService, extractDNSEntries: source with id ${mockContainerInfo.Id} has empty array for a label and has been ignored`,
           );
         },
       );
@@ -538,7 +626,7 @@ describe('DockerService', () => {
           );
           expect(mockConsoleLoggerService.warn).toHaveBeenCalledTimes(1);
           expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
-            `DockerService, extractDNSEntries: container with id ${mockContainerInfo.Id} has an unrecognised shape, check the values`,
+            `DockerService, extractDNSEntries: source with id ${mockContainerInfo.Id} has an unrecognised shape, check the values`,
           );
         },
       );
@@ -563,7 +651,7 @@ describe('DockerService', () => {
         );
         expect(mockConsoleLoggerService.warn).toHaveBeenCalledTimes(1);
         expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
-          `DockerService, extractDNSEntries: container with id ${mockContainerInfo.Id} has validation errors`,
+          `DockerService, extractDNSEntries: source with id ${mockContainerInfo.Id} has validation errors`,
           expect.arrayContaining([
             expect.objectContaining({
               property: 'address',
@@ -599,7 +687,7 @@ describe('DockerService', () => {
         );
         expect(mockConsoleLoggerService.warn).toHaveBeenCalledTimes(1);
         expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
-          `DockerService, extractDNSEntries: container with id ${mockContainerInfo.Id} has 'id' within it's JSON label, please remove it`,
+          `DockerService, extractDNSEntries: source with id ${mockContainerInfo.Id} has 'id' within it's JSON label, please remove it`,
         );
       });
 
