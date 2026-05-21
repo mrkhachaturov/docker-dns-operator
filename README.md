@@ -83,6 +83,21 @@ Detailed examples are available in the [Examples](#examples) section.
 | MIKROTIK_PASSWORD                |                             | Optional. MikroTik password. Required together with MIKROTIK_BASEURL and MIKROTIK_USERNAME to enable MikroTik provider.                                                                                                                                                                                                                                                                     |
 | MIKROTIK_SKIP_TLS_VERIFY         | false                       | Optional. If true, TLS certificate verification is disabled for MikroTik REST requests. Use only in trusted environments.                                                                                                                                                                                                                                                                   |
 | MIKROTIK_DEFAULT_TTL             | 3600                        | Optional. Default TTL in seconds for MikroTik-created records.                                                                                                                                                                                                                                                                                                                              |
+| RFC2136_TRANSPORT_URL            |                             | Optional. RFC2136 provider is enabled when all `RFC2136_*` required vars are set (TRANSPORT_URL, AUTH_MODE, HOSTS, ZONES, KERBEROS_REALM, KERBEROS_PRINCIPAL, KEYTAB_FILE). All-or-nothing.<br/><br/>URL of the rfc2136-transport sidecar. The orchestrator probes `<URL>/healthz` at startup.                                                                                              |
+| RFC2136_AUTH_MODE                |                             | Optional. Currently must be `gss-tsig`. `hmac-tsig` and `insecure` are recognized by the schema but rejected at startup.                                                                                                                                                                                                                                                                    |
+| RFC2136_HOSTS                    |                             | Optional. Comma-separated FQDNs of AD DCs in failover order. Must be FQDNs — IPs and bare hostnames break Kerberos SPN binding.                                                                                                                                                                                                                                                             |
+| RFC2136_PORT                     | 53                          | Optional. UDP/TCP port used to talk to the AD DCs.                                                                                                                                                                                                                                                                                                                                          |
+| RFC2136_ZONES                    |                             | Optional. Comma-separated zones this provider manages.                                                                                                                                                                                                                                                                                                                                      |
+| RFC2136_KERBEROS_REALM           |                             | Optional. Kerberos realm in uppercase, e.g. `CORP.EXAMPLE.COM`.                                                                                                                                                                                                                                                                                                                             |
+| RFC2136_KERBEROS_PRINCIPAL       |                             | Optional. Service principal that the keytab authenticates, e.g. `svc-dns@CORP.EXAMPLE.COM`.                                                                                                                                                                                                                                                                                                 |
+| RFC2136_KEYTAB_FILE              |                             | Optional. Path **inside the sidecar container** to the keytab file. Typically `/run/secrets/rfc2136_keytab`.                                                                                                                                                                                                                                                                                |
+| RFC2136_KRB5_CONF                | /etc/krb5.conf              | Optional. Path inside the sidecar container to the `krb5.conf` file.                                                                                                                                                                                                                                                                                                                        |
+| RFC2136_DEFAULT_TTL              | 3600                        | Optional. Default TTL (seconds) applied to records created via RFC2136 when no per-entry TTL is supplied.                                                                                                                                                                                                                                                                                   |
+| RFC2136_MIN_TTL                  | 60                          | Optional. Minimum TTL (seconds) the provider will accept; values below this floor are clamped up.                                                                                                                                                                                                                                                                                           |
+| RFC2136_AXFR_TIMEOUT_SECONDS     | 30                          | Optional. Timeout (seconds) for AXFR zone-read requests against the sidecar.                                                                                                                                                                                                                                                                                                                |
+| RFC2136_UPDATE_TIMEOUT_SECONDS   | 15                          | Optional. Timeout (seconds) for DNS UPDATE apply requests against the sidecar.                                                                                                                                                                                                                                                                                                              |
+| RFC2136_CIRCUIT_BREAKER_THRESHOLD | 3                          | Optional. Consecutive failures against a single DC before the breaker trips and the orchestrator fails over to the next host in `RFC2136_HOSTS`.                                                                                                                                                                                                                                            |
+| RFC2136_DRY_RUN                  | false                       | Optional. If `true`, the orchestrator (and the sidecar) log intended changes but do not send DNS UPDATE.                                                                                                                                                                                                                                                                                    |
 | LOG_LEVEL                        | error                       | The current logging level. The default is error, meaning only errors and fatal get logged.<br/><br/>Each level includes the levels above it from most specific to least specific. By way of example, verbose will output everything. debug will ignore verbose. log will ignore debug and verbose.<br/><br/>From most specific to least:</br>fatal<br/>error<br/>warn<br/>log<br/>debug<br/>verbose<br/><br/>These log levels come from the NestJS project. |
 
 #### PROJECT_LABEL and INSTANCE_ID
@@ -777,3 +792,39 @@ services:
 ```
 
 > **Note:** `PRESERVE_STOPPED` has no effect in Swarm mode. All services are always returned.
+
+### Routing an entry to AD DNS via RFC2136
+
+The service reads ONE Docker label keyed by `ENTRY_IDENTIFIER` (default `docker-compose-external-dns:1`); its value is a JSON-stringified array of entry objects:
+
+```yaml
+services:
+  myapp:
+    image: myapp:latest
+    labels:
+      # Replace the key prefix with your actual ENTRY_IDENTIFIER.
+      docker-compose-external-dns:1: |
+        [
+          {
+            "type": "A",
+            "name": "app.internal.corp",
+            "address": "10.20.30.40",
+            "providers": ["rfc2136"],
+            "providerOptions": { "rfc2136": { "ttl": 600 } }
+          }
+        ]
+```
+
+Use `"providers": ["rfc2136", "cf"]` to write the same entry to both AD and CloudFlare. To register multiple records from one container, add more objects to the JSON array.
+
+### AAAA records
+
+`rfc2136` is currently the only provider in this fork that handles `AAAA` records. The CloudFlare and MikroTik providers will throw at runtime if asked to handle an `AAAA` entry — use the `providers` field to keep `AAAA` entries on `rfc2136` only:
+
+```yaml
+labels:
+  - 'docker-compose-external-dns:1=[
+      { "type": "AAAA", "name": "app.internal.corp", "address": "2001:db8::42", "providers": ["rfc2136"] }]'
+```
+
+If you need `AAAA` support on another provider, route the entry only to `rfc2136` until that provider gains `AAAA` handling.
