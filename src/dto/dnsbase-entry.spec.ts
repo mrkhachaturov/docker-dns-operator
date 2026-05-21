@@ -1,6 +1,8 @@
 import each from 'jest-each';
 import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
 import { DnsbaseEntry, DNSTypes } from './dnsbase-entry';
+import { DnsaEntry } from './dnsa-entry';
 
 export type DnsBaseCloudflareEntry = {
   zoneId: string;
@@ -50,6 +52,25 @@ describe('DnsbaseEntry', () => {
   it('should accept providerOptions', () => {
     sut.providerOptions = { cf: { proxy: true } };
     expect(sut.providerOptions?.cf?.proxy).toBe(true);
+  });
+
+  describe('DNSTypes', () => {
+    it('includes AAAA for IPv6 records', () => {
+      expect(DNSTypes.AAAA).toBe('AAAA');
+    });
+  });
+
+  describe('IProviderOptions.rfc2136', () => {
+    it('accepts a numeric ttl', () => {
+      const entry = plainToInstance(DnsaEntry, {
+        type: DNSTypes.A,
+        name: 'host.example.com',
+        address: '10.0.0.1',
+        providers: ['rfc2136'],
+        providerOptions: { rfc2136: { ttl: 600 } },
+      });
+      expect(entry.providerOptions?.rfc2136?.ttl).toBe(600);
+    });
   });
 
   describe('validation', () => {
