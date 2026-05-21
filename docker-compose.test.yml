@@ -1,0 +1,50 @@
+# Local smoke-test compose for the rfc2136 provider.
+#
+# NOT for production deployment — that's the swarm repo's job.
+# Replace the EXAMPLE.COM placeholders below with your real values, OR
+# put them in a docker-compose.override.yml that's gitignored, OR use
+# a .env file with $-substitution. This file ships with placeholders so
+# the repo stays free of any operator's site-specific names.
+#
+# Prereqs before `docker compose -f docker-compose.test.yml up`:
+#   1. ./test/keytab/<your>.keytab    — generated via ktpass on the DC
+#                                       (see docs/rfc2136-integration-runbook.md
+#                                       in your local checkout, not git-tracked)
+#   2. ./test/krb5.conf               — points at your realm + KDCs
+#   3. transport image built          — `docker build -t docker-external-dns-transport:dev transport-rfc2136/`
+#
+# Flip RFC2136_DRY_RUN to "false" once you've confirmed boot is clean.
+
+services:
+  transport:
+    image: docker-external-dns-transport:dev
+    environment:
+      TRANSPORT_LISTEN: ":9090"
+      RFC2136_KERBEROS_REALM: "CORP.EXAMPLE.COM"
+      RFC2136_KERBEROS_PRINCIPAL: "svc-dns@CORP.EXAMPLE.COM"
+      RFC2136_KEYTAB_FILE: "/keytab/svc-dns.keytab"
+      RFC2136_KRB5_CONF: "/etc/krb5.conf"
+      RFC2136_DRY_RUN: "true"
+    volumes:
+      - ./test/keytab:/keytab:ro
+      - ./test/krb5.conf:/etc/krb5.conf:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  external-dns:
+    build: .
+    depends_on: [transport]
+    environment:
+      LOG_LEVEL: "debug"
+      PROJECT_LABEL: "docker-compose-external-dns"
+      INSTANCE_ID: "1"
+      EXECUTION_FREQUENCY_SECONDS: "30"
+      RFC2136_TRANSPORT_URL: "http://transport:9090"
+      RFC2136_AUTH_MODE: "gss-tsig"
+      RFC2136_HOSTS: "dc01.corp.example.com,dc02.corp.example.com"
+      RFC2136_ZONES: "corp.example.com"
+      RFC2136_KERBEROS_REALM: "CORP.EXAMPLE.COM"
+      RFC2136_KERBEROS_PRINCIPAL: "svc-dns@CORP.EXAMPLE.COM"
+      RFC2136_KEYTAB_FILE: "/keytab/svc-dns.keytab"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
