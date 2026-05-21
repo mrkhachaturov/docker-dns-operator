@@ -12,6 +12,7 @@ import { IConfiguration } from '../app.configuration';
 import { NestedError } from '../errors/nested-error';
 import { DockerFactory } from './docker.factory';
 import { DnsaEntry } from '../dto/dnsa-entry';
+import { DnsAaaaEntry } from '../dto/dnsaaaa-entry';
 import { DnsBaseCloudflareEntry } from '../dto/dnsbase-entry.spec';
 import { getLogClassDecorator } from '../utility.functions';
 import {
@@ -127,19 +128,18 @@ export class DockerService {
       });
 
       // Only use Spec.Labels (set by deploy.labels in compose).
-      const sources: DockerSource[] = [];
-      for (const service of services) {
-        const labels = service.Spec?.Labels;
-
-        if (!labels) {
-          this.loggerService.warn(
-            `DockerService, getSources: service ${service.ID} has no labels, skipping`,
-          );
-          continue;
-        }
-
-        sources.push({ Id: service.ID, Labels: labels });
-      }
+      const sources = services
+        .map((service): DockerSource | null => {
+          const labels = service.Spec?.Labels;
+          if (!labels) {
+            this.loggerService.warn(
+              `DockerService, getSources: service ${service.ID} has no labels, skipping`,
+            );
+            return null;
+          }
+          return { Id: service.ID, Labels: labels };
+        })
+        .filter((source): source is DockerSource => source !== null);
       return sources;
     } catch (error) {
       throw new NestedError(
@@ -252,6 +252,13 @@ export class DockerService {
           switch (entry.type) {
             case DNSTypes.A:
               instance = plainToInstance(DnsaEntry, {
+                ...restEntry,
+                providers,
+                ...(providerOptions ? { providerOptions } : {}),
+              });
+              break;
+            case DNSTypes.AAAA:
+              instance = plainToInstance(DnsAaaaEntry, {
                 ...restEntry,
                 providers,
                 ...(providerOptions ? { providerOptions } : {}),

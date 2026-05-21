@@ -4,6 +4,7 @@ import Docker from 'dockerode';
 import { ConfigService } from '@nestjs/config';
 import each from 'jest-each';
 import { validDnsAEntry } from '../dto/dnsa-entry.spec';
+import { DnsAaaaEntry } from '../dto/dnsaaaa-entry';
 import { validDnsCnameEntry } from '../dto/dnscname-entry.spec';
 import { DnsbaseEntry, DNSTypes } from '../dto/dnsbase-entry';
 import { DockerFactory } from './docker.factory';
@@ -479,6 +480,27 @@ describe('DockerService', () => {
             service: 'DockerService',
           }),
         );
+      });
+
+      it('extracts AAAA records from a JSON-array label', () => {
+        const aaaaContainer = mockContainerInfoBuilder
+          .WithId('id-aaaa')
+          .Build();
+        aaaaContainer.Labels[expectedDockerLabel] = JSON.stringify([
+          {
+            type: DNSTypes.AAAA,
+            name: 'ipv6.example.com',
+            address: '2001:db8::1',
+            providers: ['rfc2136'],
+          },
+        ]);
+
+        const entries = sut.extractDNSEntries([aaaaContainer]);
+        expect(entries).toHaveLength(1);
+        expect(entries[0].type).toBe(DNSTypes.AAAA);
+        expect(entries[0].name).toBe('ipv6.example.com');
+        expect((entries[0] as DnsAaaaEntry).address).toBe('2001:db8::1');
+        expect(entries[0].providers).toEqual(['rfc2136']);
       });
 
       it('should return all entries including duplicates (dedup is handled upstream)', () => {

@@ -55,26 +55,39 @@ export function parseProxyBoolean(value: unknown): boolean | null {
 
 /**
  * Extracts provider-specific options from a raw label entry object.
- * Handles both legacy top-level `proxy` and explicit `providerOptions.cf.proxy`.
- * Returns null if proxy is present but has an invalid type (caller must warn + skip entry).
+ * Supports cf (proxy) and rfc2136 (ttl). Returns null on any malformed value
+ * so the caller can warn and skip the entry.
  */
 export function normalizeProviderOptions(
   raw: Record<string, unknown>,
 ): IProviderOptions | null | undefined {
-  // Explicit nested form takes precedence
-  const nested = (raw.providerOptions as any)?.cf?.proxy;
-  if (nested !== undefined) {
-    const parsed = parseProxyBoolean(nested);
-    if (parsed === null) return null; // malformed — signal caller to warn + skip
-    return { cf: { proxy: parsed } };
-  }
+  const out: IProviderOptions = {};
 
-  // Legacy top-level proxy (CF-specific backward compat)
-  if (raw.proxy !== undefined) {
+  // CF: explicit nested form takes precedence; legacy top-level `proxy` is fallback.
+  const nestedProxy = (raw.providerOptions as Record<string, any> | undefined)
+    ?.cf?.proxy;
+  if (nestedProxy !== undefined) {
+    const parsed = parseProxyBoolean(nestedProxy);
+    if (parsed === null) return null;
+    out.cf = { proxy: parsed };
+  } else if (raw.proxy !== undefined) {
     const parsed = parseProxyBoolean(raw.proxy);
-    if (parsed === null) return null; // malformed — signal caller to warn + skip
-    return { cf: { proxy: parsed } };
+    if (parsed === null) return null;
+    out.cf = { proxy: parsed };
   }
 
-  return undefined;
+  // rfc2136: nested form only — no legacy top-level shortcut.
+  const rfc2136Ttl = (raw.providerOptions as Record<string, any> | undefined)
+    ?.rfc2136?.ttl;
+  if (rfc2136Ttl !== undefined) {
+    const n =
+      typeof rfc2136Ttl === 'number'
+        ? rfc2136Ttl
+        : Number.parseInt(String(rfc2136Ttl), 10);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    out.rfc2136 = { ttl: n };
+  }
+
+  if (Object.keys(out).length === 0) return undefined;
+  return out;
 }
