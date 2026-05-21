@@ -3,6 +3,7 @@ import { AppModule } from './app.module';
 import { AppService } from './app.service';
 import { getConfigModuleImport } from './app.configuration';
 import { ConsoleLoggerService } from './logger.service';
+import { Rfc2136Service } from './rfc2136/rfc2136.service';
 
 /**
  * Main application bootstrap!
@@ -21,6 +22,10 @@ async function bootstrap() {
   app.enableShutdownHooks();
   const appService = app.get(AppService);
   appService.initialize();
+  const rfc2136 = app.get(Rfc2136Service);
+  if (rfc2136.isConfigured()) {
+    await rfc2136.probeSidecar();
+  }
   appService.start();
 }
 bootstrap();
