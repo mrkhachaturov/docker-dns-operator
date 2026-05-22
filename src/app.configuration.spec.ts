@@ -523,7 +523,7 @@ describe('App Configuration', () => {
       'RFC2136_UPDATE_TIMEOUT_SECONDS',
       'RFC2136_CIRCUIT_BREAKER_THRESHOLD',
       'RFC2136_DRY_RUN',
-      'RFC2136_TAXFR',
+      'RFC2136_AXFR_ENABLED',
       'RFC2136_DOMAIN_FILTER',
     ];
 

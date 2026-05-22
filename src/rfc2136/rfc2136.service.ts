@@ -108,7 +108,7 @@ export class Rfc2136Service implements IDnsProvider {
         this.config.get('RFC2136_CIRCUIT_BREAKER_THRESHOLD') ?? 3,
       ),
       dryRun: this.config.get<boolean>('RFC2136_DRY_RUN') === true,
-      taxfr: this.config.get<boolean>('RFC2136_TAXFR') !== false,
+      taxfr: this.config.get<boolean>('RFC2136_AXFR_ENABLED') !== false,
       domainFilter: domainFilterRaw
         ? domainFilterRaw
             .split(',')
@@ -168,7 +168,7 @@ export class Rfc2136Service implements IDnsProvider {
     this.availableDcsThisCycle = availableDcs;
 
     if (!this.resolved.taxfr) {
-      // TAXFR disabled — pin first available DC per zone deterministically.
+      // AXFR disabled — pin first available DC per zone deterministically.
       // No reads — we rely on UPDATE prerequisites for collision detection.
       if (availableDcs.length === 0) {
         // eslint-disable-next-line no-restricted-syntax
@@ -362,7 +362,7 @@ export class Rfc2136Service implements IDnsProvider {
       const skipOwnershipTxtPrereq =
         this.orphanOwnershipNames.has(ownershipName);
 
-      // Collision detection: only meaningful when we have AXFR cache (TAXFR=true).
+      // Collision detection: only meaningful when AXFR is enabled.
       // RFC 1034 §3.6.2: CNAME is mutually exclusive with all other types at the same name.
       if (this.resolved!.taxfr) {
         const sameName = raw.filter(

@@ -145,7 +145,7 @@ graph LR
 
 The Kerberos/TSIG protocol layer runs in a separate Go sidecar (`transport-rfc2136`). The sidecar runs `kinit -kt` against a keytab on startup, refreshes the TGT every `RFC2136_KINIT_REFRESH_INTERVAL`, signs UPDATE and AXFR with GSS-TSIG, and exposes `/healthz` (HTTP 503 with `{"kerberos":"expired"}` on refresh failure).
 
-The operator implements failover across multiple DCs (`RFC2136_HOSTS`) with a per-DC circuit breaker, per-zone DC pinning, and a TAXFR-off mode for environments where AXFR is denied.
+The operator implements failover across multiple DCs (`RFC2136_HOSTS`) with a per-DC circuit breaker, per-zone DC pinning, and an AXFR-disabled mode (`RFC2136_AXFR_ENABLED=false`) for environments where zone transfers are denied.
 
 > [!CAUTION]
 > `RFC2136_HOSTS` must contain real DNS hostnames of your DCs. IPs and bare hostnames are rejected at startup. AD's Kerberos service principal is bound to the host you contact; an IP or short name produces `KDC_ERR_S_PRINCIPAL_UNKNOWN` or `KDC_ERR_WRONG_REALM` on every cycle.
@@ -219,7 +219,7 @@ Every required variable must be set, or the provider is silently skipped.
 | `RFC2136_UPDATE_TIMEOUT_SECONDS` | `15` | DNS UPDATE request timeout. |
 | `RFC2136_CIRCUIT_BREAKER_THRESHOLD` | `3` | Consecutive failures before failing over to the next DC. |
 | `RFC2136_DRY_RUN` | `false` | If `true`, log intended changes but do not apply. |
-| `RFC2136_TAXFR` | `true` | If `false`, skip AXFR (use when AD blocks zone transfers). Reduces drift detection; writes rely on UPDATE prerequisites. |
+| `RFC2136_AXFR_ENABLED` | `true` | If `false`, skip AXFR (use when AD blocks zone transfers). Reduces drift detection; writes rely on UPDATE prerequisites. |
 | `RFC2136_DOMAIN_FILTER` |  | Comma-separated name suffixes. Restricts which entries are managed without narrowing `RFC2136_ZONES`. |
 | `RFC2136_KINIT_REFRESH_INTERVAL` | `12h` | Sidecar setting. How often the TGT is refreshed. Go duration syntax. |
 

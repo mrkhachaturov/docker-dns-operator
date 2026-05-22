@@ -1080,7 +1080,7 @@ describe('Rfc2136Service', () => {
     });
   });
 
-  describe('TAXFR=false mode', () => {
+  describe('AXFR-disabled mode (RFC2136_AXFR_ENABLED=false)', () => {
     beforeEach(() => {
       config.get.mockImplementation(
         (key: string) =>
@@ -1093,7 +1093,7 @@ describe('Rfc2136Service', () => {
               RFC2136_ZONES: 'zone-a.example.com',
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_TAXFR: false,
+              RFC2136_AXFR_ENABLED: false,
               PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
@@ -1110,7 +1110,7 @@ describe('Rfc2136Service', () => {
       );
     });
 
-    it('getRecords returns [] in TAXFR-off mode', async () => {
+    it('getRecords returns [] when AXFR is disabled', async () => {
       await service.prepareForJob();
       const records = await service.getRecords();
       expect(records).toEqual([]);

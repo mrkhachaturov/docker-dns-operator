@@ -106,7 +106,7 @@ export const validationSchema = Joi.object({
   RFC2136_UPDATE_TIMEOUT_SECONDS: Joi.number().integer().min(1).default(15),
   RFC2136_CIRCUIT_BREAKER_THRESHOLD: Joi.number().integer().min(1).default(3),
   RFC2136_DRY_RUN: Joi.boolean().default(false),
-  RFC2136_TAXFR: Joi.boolean().default(true),
+  RFC2136_AXFR_ENABLED: Joi.boolean().default(true),
   RFC2136_DOMAIN_FILTER: Joi.string().optional(),
 })
   .custom((value, helpers) => {
@@ -302,6 +302,6 @@ export interface IConfiguration {
   RFC2136_UPDATE_TIMEOUT_SECONDS: number;
   RFC2136_CIRCUIT_BREAKER_THRESHOLD: number;
   RFC2136_DRY_RUN: boolean;
-  RFC2136_TAXFR: boolean;
+  RFC2136_AXFR_ENABLED: boolean;
   RFC2136_DOMAIN_FILTER?: string;
 }
