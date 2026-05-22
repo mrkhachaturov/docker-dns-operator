@@ -1,6 +1,6 @@
 # 🧭 docker-dns-operator
 
-> 🐳 Declarative DNS for Docker. The Docker analog of [kubernetes-sigs/external-dns](https://github.com/kubernetes-sigs/external-dns): label your containers (standalone Docker) or services (Swarm) with the desired DNS records and the operator reconciles them into CloudFlare, MikroTik RouterOS, and/or Active Directory DNS on every tick.
+> 🐳 Declarative DNS for Docker. The Docker analog of [kubernetes-sigs/external-dns](https://github.com/kubernetes-sigs/external-dns): label your containers (standalone Docker) or services (Swarm) with the desired DNS records and the operator reconciles them into Cloudflare, MikroTik RouterOS, and/or Active Directory DNS on every tick.
 
 [![Docker Hub](https://img.shields.io/docker/v/mrkhachaturov/docker-dns-operator?label=docker&sort=semver)](https://hub.docker.com/r/mrkhachaturov/docker-dns-operator)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -10,7 +10,7 @@
 | 🐳 | Runs on | Standalone Docker (default) and Docker Swarm (`DOCKER_SWARM_MODE=true`) |
 | 🏷️ | Source of truth | Container labels, or Swarm `deploy.labels` |
 | 🔄 | Reconciler | Reads labels every `EXECUTION_FREQUENCY_SECONDS`, diffs, applies |
-| 🌐 | Providers | CloudFlare, MikroTik RouterOS, RFC 2136 / Active Directory |
+| 🌐 | Providers | Cloudflare, MikroTik RouterOS, RFC 2136 / Active Directory |
 | 🛡️ | Ownership | TXT marker `ddo-<type>.<name>`. Pre-existing records are never touched |
 | 🧩 | Records | A, AAAA (rfc2136), CNAME, MX, NS |
 
@@ -40,7 +40,7 @@
 graph LR
     DK["🐳 Docker socket<br/>containers / services"] --> OP["🧭 docker-dns-operator<br/>reconciler loop"]
 
-    OP --> CF["☁️ CloudFlare<br/>public DNS"]
+    OP --> CF["☁️ Cloudflare<br/>public DNS"]
     OP --> MT["📡 MikroTik<br/>RouterOS REST"]
     OP --> TR["🔌 transport-rfc2136<br/>Kerberos / GSS-TSIG"]
     TR --> AD["🏢 Active Directory<br/>DNS (RFC 2136)"]
@@ -64,12 +64,14 @@ Standalone Docker is the default. Swarm mode is opt-in via `DOCKER_SWARM_MODE=tr
 
 > [!IMPORTANT]
 > Every managed record carries a sibling TXT record at `ddo-<type>.<name>` whose value is `owned-by=${PROJECT_LABEL}:${INSTANCE_ID}`. The reconciler refuses to modify any record without that marker.
+>
+> For an A record at `app.example.com` you'll see a paired `TXT ddo-a.app.example.com "owned-by=docker-dns-operator:1"` in the zone.
 
 ---
 
 ## ⚡ Quick start
 
-Minimum CloudFlare setup. Drop this into a `docker-compose.yml`, supply a token, run `docker compose up -d`:
+Minimum Cloudflare setup. Drop this into a `docker-compose.yml`, supply a token, run `docker compose up -d`:
 
 ```yaml
 services:
@@ -94,7 +96,7 @@ secrets:
     file: ./cloudflare_token.txt
 ```
 
-The operator polls Docker every `EXECUTION_FREQUENCY_SECONDS` (default 60), reads the label off `whoami`, and creates `whoami.example.com` in CloudFlare. Remove the container, the record is removed on the next tick.
+The operator polls Docker every `EXECUTION_FREQUENCY_SECONDS` (default 60), reads the label off `whoami`, and creates `whoami.example.com` in Cloudflare. Remove the container, the record is removed on the next tick.
 
 For MikroTik or Active Directory, see [Providers](#-providers).
 
@@ -102,7 +104,7 @@ For MikroTik or Active Directory, see [Providers](#-providers).
 
 ## 🌐 Providers
 
-### ☁️ CloudFlare
+### ☁️ Cloudflare
 
 Enabled when `API_TOKEN` **or** `API_TOKEN_FILE` is set. The token needs `Zone.Zone:Read` and `Zone.DNS:Edit` for every zone you manage.
 
@@ -121,7 +123,7 @@ If your router uses a self-signed certificate, set `MIKROTIK_SKIP_TLS_VERIFY=tru
 
 ### 🏢 RFC 2136 / Active Directory
 
-Enabled when the full `RFC2136_*` block is set. Performs secure dynamic DNS updates (RFC 2136 + GSS-TSIG) against AD domain controllers. Same protocol [external-dns](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/rfc2136.md) uses for AD integration.
+Enabled when the full `RFC2136_*` block is set. Uses the same RFC 2136 provider model as [external-dns](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/rfc2136.md), with GSS-TSIG enabled for Active Directory DNS.
 
 Supports A, AAAA, CNAME, MX, NS.
 
@@ -172,11 +174,11 @@ See [docs/rfc2136-integration-runbook.md](docs/rfc2136-integration-runbook.md) f
 </details>
 
 <details>
-<summary><strong>☁️ CloudFlare</strong></summary>
+<summary><strong>☁️ Cloudflare</strong></summary>
 
 | Variable | Default | Description |
 |---|---|---|
-| `API_TOKEN` |  | CloudFlare API token. Setting this OR `API_TOKEN_FILE` enables the provider. |
+| `API_TOKEN` |  | Cloudflare API token. Setting this OR `API_TOKEN_FILE` enables the provider. |
 | `API_TOKEN_FILE` |  | Path to a file containing the token. Preferred over `API_TOKEN`. |
 
 </details>
@@ -251,14 +253,14 @@ labels:
 | `provider` | string | Legacy singular form. Accepted and normalized to `providers`. |
 | `providerOptions` | object | Per-provider options, keyed by provider id. |
 
-`providerOptions.cf.proxy` (boolean) toggles CloudFlare proxying for A/CNAME. `providerOptions.rfc2136.ttl` (integer seconds) overrides the default TTL on rfc2136. The legacy top-level `proxy` field is still accepted for CloudFlare entries.
+`providerOptions.cf.proxy` (boolean) toggles Cloudflare proxying for A/CNAME. `providerOptions.rfc2136.ttl` (integer seconds) overrides the default TTL on rfc2136. The legacy top-level `proxy` field is still accepted for Cloudflare entries.
 
 ### 🧩 Record types
 
 | | Type | Required fields | Notes |
 |---|---|---|---|
 | 🅰️ | `A` | `address` | Address can be the literal `"DDNS"` to use the host's public IPv4. |
-| 6️⃣ | `AAAA` | `address` | rfc2136 only. CloudFlare and MikroTik throw at runtime. |
+| 6️⃣ | `AAAA` | `address` | Currently implemented only for the rfc2136 provider. Route AAAA entries to `rfc2136`. |
 | 🔗 | `CNAME` | `target` | Target should resolve via an existing A or CNAME. |
 | ✉️ | `MX` | `server`, `priority` | Priority is an integer 0–65535. |
 | 🧭 | `NS` | `server` | Delegates a (sub)domain to another nameserver. |
@@ -267,7 +269,7 @@ labels:
 
 ## 📦 Examples
 
-### 🔐 Token in a file (recommended for CloudFlare)
+### 🔐 Token in a file (recommended for Cloudflare)
 
 ```yaml
 services:
@@ -292,7 +294,7 @@ secrets:
 ```
 
 <details>
-<summary>🔀 <strong>Split routing — public to CloudFlare, internal to MikroTik</strong></summary>
+<summary>🔀 <strong>Split routing — public to Cloudflare, internal to MikroTik</strong></summary>
 
 ```yaml
 services:
@@ -300,13 +302,11 @@ services:
     image: mrkhachaturov/docker-dns-operator:latest
     environment:
       API_TOKEN_FILE: /run/secrets/cloudflare_token
-      MIKROTIK_BASEURL: https://192.168.1.1
-      MIKROTIK_USERNAME_FILE: /run/secrets/mikrotik_user
-      MIKROTIK_PASSWORD_FILE: /run/secrets/mikrotik_pass
+      MIKROTIK_BASEURL: "https://192.168.1.1"
+      MIKROTIK_USERNAME: admin
+      MIKROTIK_PASSWORD: changeme
     secrets:
       - cloudflare_token
-      - mikrotik_user
-      - mikrotik_pass
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
@@ -337,7 +337,7 @@ The operator starts the DDNS service when any entry uses `"DDNS"`, queries the c
 <details>
 <summary>🔢 <strong>Two domains, two operator instances</strong></summary>
 
-Independent CloudFlare tokens by `INSTANCE_ID`:
+Independent Cloudflare tokens by `INSTANCE_ID`:
 
 ```yaml
 services:
@@ -457,7 +457,7 @@ The main operator does not currently expose an HTTP health endpoint. The rfc2136
 ### ⚠️ Failure modes worth knowing
 
 - 🏢 The rfc2136 provider is all-or-nothing. Every required variable must be set, or the provider is silently not registered and entries routed to `rfc2136` are dropped with a warning.
-- 6️⃣ AAAA records on CloudFlare or MikroTik throw at runtime. Route AAAA only to `rfc2136`.
+- 6️⃣ AAAA is currently implemented only for the rfc2136 provider. Route AAAA entries to `rfc2136`.
 
 ---
 
@@ -465,7 +465,7 @@ The main operator does not currently expose an HTTP health endpoint. The rfc2136
 
 | | Concern | Recommendation |
 |---|---|---|
-| 🔑 | CloudFlare tokens | Use `API_TOKEN_FILE` with a Docker secret. Scope to `Zone.Zone:Read` + `Zone.DNS:Edit` on the specific zones only. |
+| 🔑 | Cloudflare tokens | Use `API_TOKEN_FILE` with a Docker secret. Scope to `Zone.Zone:Read` + `Zone.DNS:Edit` on the specific zones only. |
 | 📡 | MikroTik creds | Dedicated RouterOS user with `dns` + `read` groups only, console/SSH denied. |
 | 🏢 | Keytab (rfc2136) | Mount via Docker secret, never a world-readable bind mount. AD service account scoped to update only zones in `RFC2136_ZONES`. |
 | 🐳 | Docker socket | Mount `:ro`. Consider [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) in hostile multi-tenant environments. |
