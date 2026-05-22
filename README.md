@@ -1,13 +1,14 @@
 # 🧭 docker-dns-operator
 
-> 🐳 Declarative DNS for Docker. Annotate a container or Swarm service with a JSON label and the operator reconciles those records into CloudFlare, MikroTik RouterOS, and/or Active Directory DNS on every tick.
+> 🐳 Declarative DNS for Docker. The Docker analog of [kubernetes-sigs/external-dns](https://github.com/kubernetes-sigs/external-dns): label your containers (standalone Docker) or services (Swarm) with the desired DNS records and the operator reconciles them into CloudFlare, MikroTik RouterOS, and/or Active Directory DNS on every tick.
 
 [![Docker Hub](https://img.shields.io/docker/v/mrkhachaturov/docker-dns-operator?label=docker&sort=semver)](https://hub.docker.com/r/mrkhachaturov/docker-dns-operator)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 | | Scope | Meaning |
 |---|---|---|
-| 🐳 | Source of truth | Container or Swarm service labels |
+| 🐳 | Runs on | Standalone Docker (default) and Docker Swarm (`DOCKER_SWARM_MODE=true`) |
+| 🏷️ | Source of truth | Container labels, or Swarm `deploy.labels` |
 | 🔄 | Reconciler | Reads labels every `EXECUTION_FREQUENCY_SECONDS`, diffs, applies |
 | 🌐 | Providers | CloudFlare, MikroTik RouterOS, RFC 2136 / Active Directory |
 | 🛡️ | Ownership | TXT marker `ddo-<type>.<name>`. Pre-existing records are never touched |
@@ -54,10 +55,12 @@ graph LR
 
 Each tick the reconciler:
 
-1. 📥 Lists containers (or Swarm services, when `DOCKER_SWARM_MODE=true`).
+1. 📥 Lists Docker containers (or Swarm services when `DOCKER_SWARM_MODE=true`).
 2. 🏷️ Parses the `${PROJECT_LABEL}:${INSTANCE_ID}` label as a JSON array of entries.
 3. 🔀 Groups entries by their `providers` field.
 4. ⚖️ For each provider, diffs desired state against owned records and applies create/update/delete.
+
+Standalone Docker is the default. Swarm mode is opt-in via `DOCKER_SWARM_MODE=true`, in which case labels must live under `deploy.labels` and the operator must run on a manager node.
 
 > [!IMPORTANT]
 > Every managed record carries a sibling TXT record at `ddo-<type>.<name>` whose value is `owned-by=${PROJECT_LABEL}:${INSTANCE_ID}`. The reconciler refuses to modify any record without that marker.
