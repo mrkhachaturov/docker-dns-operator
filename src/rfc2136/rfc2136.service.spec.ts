@@ -56,7 +56,6 @@ describe('Rfc2136Service', () => {
               RFC2136_ZONES: 'corp.example.com',
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
             }) as Record<string, unknown>
           )[key],
       );
@@ -88,7 +87,6 @@ describe('Rfc2136Service', () => {
               RFC2136_ZONES: 'corp.example.com',
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
             }) as Record<string, unknown>
           )[key],
       );
@@ -126,7 +124,6 @@ describe('Rfc2136Service', () => {
               RFC2136_ZONES: 'zone-a.example.com,zone-b.example.com',
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               RFC2136_AXFR_TIMEOUT_SECONDS: 5,
               RFC2136_CIRCUIT_BREAKER_THRESHOLD: 3,
             }) as Record<string, unknown>
@@ -303,7 +300,6 @@ describe('Rfc2136Service', () => {
               RFC2136_ZONES: 'zone-a.example.com',
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
@@ -406,7 +402,6 @@ describe('Rfc2136Service', () => {
               RFC2136_ZONES: 'zone-a.example.com',
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               RFC2136_DEFAULT_TTL: 300,
               RFC2136_MIN_TTL: 60,
               PROJECT_LABEL: 'docker-dns-operator',
@@ -535,7 +530,6 @@ describe('Rfc2136Service', () => {
               RFC2136_ZONES: 'zone-a.example.com',
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
@@ -635,7 +629,6 @@ describe('Rfc2136Service', () => {
               RFC2136_ZONES: 'zone-a.example.com',
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
@@ -709,7 +702,6 @@ describe('Rfc2136Service', () => {
               RFC2136_ZONES: 'zone-a.example.com',
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               RFC2136_DEFAULT_TTL: 300,
               RFC2136_MIN_TTL: 60,
               PROJECT_LABEL: 'docker-dns-operator',
@@ -832,7 +824,6 @@ describe('Rfc2136Service', () => {
               RFC2136_ZONES: 'zone-a.example.com',
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               RFC2136_DEFAULT_TTL: 300,
               RFC2136_MIN_TTL: 60,
               PROJECT_LABEL: 'docker-dns-operator',
@@ -909,7 +900,6 @@ describe('Rfc2136Service', () => {
               RFC2136_ZONES: 'zone-a.example.com',
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
@@ -975,7 +965,6 @@ describe('Rfc2136Service', () => {
               RFC2136_ZONES: 'zone-a.example.com',
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               RFC2136_DOMAIN_FILTER: 'containers.zone-a.example.com',
               PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
@@ -1104,7 +1093,6 @@ describe('Rfc2136Service', () => {
               RFC2136_ZONES: 'zone-a.example.com',
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               RFC2136_TAXFR: false,
               PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',

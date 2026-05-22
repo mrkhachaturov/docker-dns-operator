@@ -516,7 +516,6 @@ describe('App Configuration', () => {
       'RFC2136_ZONES',
       'RFC2136_KERBEROS_REALM',
       'RFC2136_KERBEROS_PRINCIPAL',
-      'RFC2136_KEYTAB_FILE',
       'RFC2136_KRB5_CONF',
       'RFC2136_DEFAULT_TTL',
       'RFC2136_MIN_TTL',
@@ -549,7 +548,6 @@ describe('App Configuration', () => {
       process.env.RFC2136_ZONES = 'corp.example.com';
       process.env.RFC2136_KERBEROS_REALM = 'CORP.EXAMPLE.COM';
       process.env.RFC2136_KERBEROS_PRINCIPAL = 'svc-dns@CORP.EXAMPLE.COM';
-      process.env.RFC2136_KEYTAB_FILE = '/run/secrets/rfc2136_keytab';
     }
 
     it('accepts a complete valid RFC2136 config', async () => {

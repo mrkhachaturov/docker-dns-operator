@@ -210,7 +210,6 @@ Every required variable must be set, or the provider is silently skipped.
 | `RFC2136_ZONES` |  | Comma-separated zones this provider manages. |
 | `RFC2136_KERBEROS_REALM` |  | Kerberos realm, uppercase (`CORP.EXAMPLE.COM`). |
 | `RFC2136_KERBEROS_PRINCIPAL` |  | Service principal the keytab authenticates (`svc-dns@CORP.EXAMPLE.COM`). |
-| `RFC2136_KEYTAB_FILE` |  | Path to the keytab **inside the sidecar container**, typically `/run/secrets/rfc2136_keytab`. |
 | `RFC2136_KRB5_CONF` | `/etc/krb5.conf` | Path to `krb5.conf` inside the sidecar. |
 | `RFC2136_DEFAULT_TTL` | `3600` | TTL when none is supplied per entry. |
 | `RFC2136_MIN_TTL` | `60` | Minimum TTL floor. Values below are clamped up. |
@@ -221,6 +220,8 @@ Every required variable must be set, or the provider is silently skipped.
 | `RFC2136_TAXFR` | `true` | If `false`, skip AXFR (use when AD blocks zone transfers). Reduces drift detection; writes rely on UPDATE prerequisites. |
 | `RFC2136_DOMAIN_FILTER` |  | Comma-separated name suffixes. Restricts which entries are managed without narrowing `RFC2136_ZONES`. |
 | `RFC2136_KINIT_REFRESH_INTERVAL` | `12h` | Sidecar setting. How often the TGT is refreshed. Go duration syntax. |
+
+The keytab itself is consumed only by the sidecar. Its env vars (`RFC2136_KERBEROS_REALM`, `RFC2136_KERBEROS_PRINCIPAL`, `RFC2136_KEYTAB_FILE`, `RFC2136_KRB5_CONF`, `RFC2136_KINIT_REFRESH_INTERVAL`) are set on the `transport-rfc2136` container, not on the operator.
 
 </details>
 
@@ -382,7 +383,6 @@ services:
       RFC2136_ZONES: corp.example.com
       RFC2136_KERBEROS_REALM: CORP.EXAMPLE.COM
       RFC2136_KERBEROS_PRINCIPAL: svc-dns@CORP.EXAMPLE.COM
-      RFC2136_KEYTAB_FILE: /run/secrets/rfc2136_keytab
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 

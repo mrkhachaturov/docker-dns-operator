@@ -87,7 +87,6 @@ describe('Rfc2136Service e2e', () => {
     process.env.RFC2136_ZONES = 'zone-a.example.com,zone-b.example.com';
     process.env.RFC2136_KERBEROS_REALM = 'CORP.EXAMPLE.COM';
     process.env.RFC2136_KERBEROS_PRINCIPAL = 'svc-dns@CORP.EXAMPLE.COM';
-    process.env.RFC2136_KEYTAB_FILE = '/run/secrets/keytab';
     process.env.RFC2136_DEFAULT_TTL = '300';
     process.env.RFC2136_MIN_TTL = '60';
     process.env.PROJECT_LABEL = 'docker-dns-operator';

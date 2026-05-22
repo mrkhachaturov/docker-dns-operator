@@ -79,7 +79,6 @@ export class Rfc2136Service implements IDnsProvider {
       'RFC2136_ZONES',
       'RFC2136_KERBEROS_REALM',
       'RFC2136_KERBEROS_PRINCIPAL',
-      'RFC2136_KEYTAB_FILE',
     ];
     return required.every((k) => !!this.config.get<string>(k));
   }

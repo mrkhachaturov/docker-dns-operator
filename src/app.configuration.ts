@@ -90,7 +90,6 @@ export const validationSchema = Joi.object({
   RFC2136_KERBEROS_PRINCIPAL: Joi.string()
     .pattern(/^[^\s@]+@[A-Z][A-Z0-9._-]*$/)
     .optional(),
-  RFC2136_KEYTAB_FILE: Joi.string().optional(),
   RFC2136_KRB5_CONF: Joi.string().default('/etc/krb5.conf'),
   RFC2136_DEFAULT_TTL: Joi.number().integer().min(60).default(3600),
   RFC2136_MIN_TTL: Joi.number().integer().min(0).default(60),
@@ -127,7 +126,6 @@ export const validationSchema = Joi.object({
       'RFC2136_ZONES',
       'RFC2136_KERBEROS_REALM',
       'RFC2136_KERBEROS_PRINCIPAL',
-      'RFC2136_KEYTAB_FILE',
     ];
     const present = required.filter(
       (k) => value[k] !== undefined && value[k] !== '',
@@ -236,7 +234,6 @@ export interface IConfiguration {
   RFC2136_ZONES?: string;
   RFC2136_KERBEROS_REALM?: string;
   RFC2136_KERBEROS_PRINCIPAL?: string;
-  RFC2136_KEYTAB_FILE?: string;
   RFC2136_KRB5_CONF: string;
   RFC2136_DEFAULT_TTL: number;
   RFC2136_MIN_TTL: number;
