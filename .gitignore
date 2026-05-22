@@ -141,3 +141,6 @@ test/krb5.conf
 
 # Claude Code local state
 .claude/
+
+# macOS
+.DS_Store
