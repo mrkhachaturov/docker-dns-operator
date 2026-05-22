@@ -38,19 +38,28 @@
 
 ```mermaid
 graph LR
-    DK["🐳 Docker socket<br/>containers / services"] --> OP["🧭 docker-dns-operator<br/>reconciler loop"]
+    DK["🐳 Docker socket<br/>containers / services"] --> OP["🧭 docker-dns-operator<br/>reconciler"]
+    OP --> P{{"🔌 DnsProvider<br/>interface"}}
 
-    OP --> CF["☁️ Cloudflare<br/>public DNS"]
-    OP --> MT["📡 MikroTik<br/>RouterOS REST"]
-    OP --> TR["🔌 ddo-rfc2136<br/>Kerberos / GSS-TSIG"]
-    TR --> AD["🏢 Active Directory<br/>DNS (RFC 2136)"]
+    P --> CF["☁️ Cloudflare"]
+    P --> MT["📡 MikroTik"]
+    P --> RF["🏢 RFC 2136"]
+    P -.-> PLUS["…more providers"]
+
+    RF -->|HTTP| WH["🔌 Webhook sidecar<br/><i>ddo-rfc2136</i>"]
+    WH -->|GSS-TSIG| AD["Active Directory DNS"]
+    PLUS -.->|HTTP| WHN["…more webhook sidecars"]
 
     style DK fill:#2496ed,color:#fff,stroke:#2496ed
     style OP fill:#0f766e,color:#fff,stroke:#0f766e
+    style P fill:#475569,color:#fff,stroke:#475569
     style CF fill:#f38020,color:#fff,stroke:#f38020
     style MT fill:#293039,color:#fff,stroke:#293039
-    style TR fill:#8b5cf6,color:#fff,stroke:#8b5cf6
+    style RF fill:#0078d4,color:#fff,stroke:#0078d4
+    style WH fill:#8b5cf6,color:#fff,stroke:#8b5cf6
     style AD fill:#0078d4,color:#fff,stroke:#0078d4
+    style PLUS fill:#94a3b8,color:#000,stroke-dasharray: 5 5
+    style WHN fill:#94a3b8,color:#000,stroke-dasharray: 5 5
 ```
 
 Each tick the reconciler:
@@ -104,6 +113,8 @@ For MikroTik or Active Directory, see [Providers](#-providers).
 
 ## 🌐 Providers
 
+The operator ships three providers today, all implementing the same `DnsProvider` interface. New ones plug in via one file — see [Development](#-development). Providers that need a protocol layer outside Node (Kerberos, signed updates, exotic transports) run as a **webhook sidecar** in their own container, addressed via `<PROVIDER>_WEBHOOK_URL` and shipped from a separate repo attached under [sidecars/](sidecars/) as a git submodule.
+
 ### ☁️ Cloudflare
 
 Enabled when `API_TOKEN` **or** `API_TOKEN_FILE` is set. The token needs `Zone.Zone:Read` and `Zone.DNS:Edit` for every zone you manage.
@@ -121,9 +132,9 @@ Supports A, CNAME, MX, NS.
 
 If your router uses a self-signed certificate, set `MIKROTIK_SKIP_TLS_VERIFY=true`. Trusted networks only.
 
-### 🏢 RFC 2136 / Active Directory
+### 🏢 RFC 2136 / Active Directory (via webhook sidecar)
 
-Enabled when the full `RFC2136_*` block is set. Uses the same RFC 2136 provider model as [external-dns](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/rfc2136.md), with GSS-TSIG enabled for Active Directory DNS.
+Enabled when the full `RFC2136_*` block is set on the operator AND the [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) webhook sidecar is running with its own keytab/Kerberos config. Uses the same RFC 2136 provider model as [external-dns](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/rfc2136.md), with GSS-TSIG for Active Directory.
 
 Supports A, AAAA, CNAME, MX, NS.
 
@@ -149,9 +160,6 @@ The operator implements failover across multiple DCs (`RFC2136_HOSTS`) with a pe
 
 > [!CAUTION]
 > `RFC2136_HOSTS` must contain real DNS hostnames of your DCs. IPs and bare hostnames are rejected at startup. AD's Kerberos service principal is bound to the host you contact; an IP or short name produces `KDC_ERR_S_PRINCIPAL_UNKNOWN` or `KDC_ERR_WRONG_REALM` on every cycle.
-
-> [!NOTE]
-> **Webhook-sidecar convention.** Aligns with [k8s external-dns webhook providers](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/webhook-provider.md): each provider that needs out-of-process work runs its own sidecar, scoped by `<PROVIDER>_WEBHOOK_URL`. Future sidecars follow the same pattern — add `sidecars/<name>/` (submodule) and a `<PROVIDER>_WEBHOOK_URL` env var.
 
 See [docs/rfc2136-integration-runbook.md](docs/rfc2136-integration-runbook.md) for keytab generation, AD permission setup, and the full deployment walkthrough.
 
