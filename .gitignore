@@ -125,3 +125,16 @@ docker-compose*.yaml
 
 # Git worktrees
 .worktrees/
+
+# Local docs
+docs/
+
+# Internal Claude context (public CLAUDE.md is committed)
+CLAUDE.local.md
+
+# Upstream reference clones (not tracked)
+.upstream/
+
+# rfc2136 integration test artifacts (env-specific, secrets)
+test/keytab/
+test/krb5.conf
