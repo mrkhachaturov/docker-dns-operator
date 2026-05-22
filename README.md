@@ -202,20 +202,19 @@ See [docs/rfc2136-integration-runbook.md](docs/rfc2136-integration-runbook.md) f
 </details>
 
 <details>
-<summary><strong>🏢 RFC 2136 (all-or-nothing)</strong></summary>
+<summary><strong>🏢 RFC 2136 — operator-side env (all-or-nothing)</strong></summary>
 
-Every required variable must be set, or the provider is silently skipped.
+All variables below must be set, or the rfc2136 provider is not registered. Entries routed to `rfc2136` then fail reconciliation with an error.
 
 | Variable | Default | Description |
 |---|---|---|
-| `RFC2136_WEBHOOK_URL` |  | URL of the ddo-rfc2136 sidecar, e.g. `http://ddo-rfc2136:9090`. Probed at `<URL>/healthz` on startup. |
+| `RFC2136_WEBHOOK_URL` |  | URL of the `ddo-rfc2136` webhook sidecar, e.g. `http://ddo-rfc2136:9090`. Probed at `<URL>/healthz` on startup. |
 | `RFC2136_AUTH_MODE` |  | Only `gss-tsig` is supported. |
 | `RFC2136_HOSTS` |  | Comma-separated FQDNs of AD DCs in failover order. IPs and short names are rejected. |
 | `RFC2136_PORT` | `53` | UDP/TCP port for DNS UPDATE. |
 | `RFC2136_ZONES` |  | Comma-separated zones this provider manages. |
-| `RFC2136_KERBEROS_REALM` |  | Kerberos realm, uppercase (`CORP.EXAMPLE.COM`). |
-| `RFC2136_KERBEROS_PRINCIPAL` |  | Service principal the keytab authenticates (`svc-dns@CORP.EXAMPLE.COM`). |
-| `RFC2136_KRB5_CONF` | `/etc/krb5.conf` | Path to `krb5.conf` inside the sidecar. |
+| `RFC2136_KERBEROS_REALM` |  | Kerberos realm, uppercase (`CORP.EXAMPLE.COM`). Validated at startup against `RFC2136_KERBEROS_PRINCIPAL`. |
+| `RFC2136_KERBEROS_PRINCIPAL` |  | Service principal (`svc-dns@CORP.EXAMPLE.COM`). Realm portion must match `RFC2136_KERBEROS_REALM`. |
 | `RFC2136_DEFAULT_TTL` | `3600` | TTL when none is supplied per entry. |
 | `RFC2136_MIN_TTL` | `60` | Minimum TTL floor. Values below are clamped up. |
 | `RFC2136_AXFR_TIMEOUT_SECONDS` | `30` | AXFR request timeout. |
@@ -224,11 +223,10 @@ Every required variable must be set, or the provider is silently skipped.
 | `RFC2136_DRY_RUN` | `false` | If `true`, log intended changes but do not apply. |
 | `RFC2136_AXFR_ENABLED` | `true` | If `false`, skip AXFR (use when AD blocks zone transfers). Reduces drift detection; writes rely on UPDATE prerequisites. |
 | `RFC2136_DOMAIN_FILTER` |  | Comma-separated name suffixes. Restricts which entries are managed without narrowing `RFC2136_ZONES`. |
-| `RFC2136_KINIT_REFRESH_INTERVAL` | `12h` | Sidecar setting. How often the TGT is refreshed. Go duration syntax. |
-
-The keytab itself is consumed only by the sidecar. Its env vars (`RFC2136_KERBEROS_REALM`, `RFC2136_KERBEROS_PRINCIPAL`, `RFC2136_KEYTAB_FILE`, `RFC2136_KRB5_CONF`, `RFC2136_KINIT_REFRESH_INTERVAL`) are set on the `ddo-rfc2136` container, not on the operator.
 
 </details>
+
+**Sidecar env (set on the `ddo-rfc2136` container):** documented in the [sidecar repo README](https://github.com/mrkhachaturov/ddo-rfc2136#required-env-vars). Each webhook sidecar owns its own configuration docs, matching the [external-dns webhook-provider model](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/webhook-provider.md). `RFC2136_KERBEROS_REALM` and `RFC2136_KERBEROS_PRINCIPAL` are duplicated on both containers — the operator validates them at startup so misconfiguration fails fast; the sidecar uses them at runtime.
 
 ### 🏷️ Label schema
 
@@ -384,21 +382,21 @@ services:
   dns-operator:
     image: mrkhachaturov/docker-dns-operator:latest
     environment:
-      RFC2136_WEBHOOK_URL: http://ddo-rfc2136:9090
-      RFC2136_AUTH_MODE: gss-tsig
-      RFC2136_HOSTS: dc01.corp.example.com,dc02.corp.example.com
-      RFC2136_ZONES: corp.example.com
-      RFC2136_KERBEROS_REALM: CORP.EXAMPLE.COM
-      RFC2136_KERBEROS_PRINCIPAL: svc-dns@CORP.EXAMPLE.COM
+      RFC2136_WEBHOOK_URL: "http://ddo-rfc2136:9090"
+      RFC2136_AUTH_MODE: "gss-tsig"
+      RFC2136_HOSTS: "dc01.corp.example.com,dc02.corp.example.com"
+      RFC2136_ZONES: "corp.example.com"
+      RFC2136_KERBEROS_REALM: "CORP.EXAMPLE.COM"
+      RFC2136_KERBEROS_PRINCIPAL: "svc-dns@CORP.EXAMPLE.COM"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   ddo-rfc2136:
     image: mrkhachaturov/ddo-rfc2136:latest
     environment:
-      RFC2136_KERBEROS_REALM: CORP.EXAMPLE.COM
-      RFC2136_KERBEROS_PRINCIPAL: svc-dns@CORP.EXAMPLE.COM
-      RFC2136_KEYTAB_FILE: /run/secrets/rfc2136_keytab
+      RFC2136_KERBEROS_REALM: "CORP.EXAMPLE.COM"
+      RFC2136_KERBEROS_PRINCIPAL: "svc-dns@CORP.EXAMPLE.COM"
+      RFC2136_KEYTAB_FILE: "/run/secrets/rfc2136_keytab"
     secrets:
       - rfc2136_keytab
 
@@ -463,7 +461,7 @@ The main operator does not currently expose an HTTP health endpoint. The ddo-rfc
 
 ### ⚠️ Failure modes worth knowing
 
-- 🏢 The rfc2136 provider is all-or-nothing. Every required variable must be set, or the provider is silently not registered and entries routed to `rfc2136` are dropped with a warning.
+- 🏢 The rfc2136 provider is all-or-nothing. Every required operator-side variable must be set, or the provider is not registered. Entries routed to `rfc2136` then fail reconciliation with an error in the log.
 - 6️⃣ AAAA is currently implemented only for the rfc2136 provider. Route AAAA entries to `rfc2136`.
 
 ---
@@ -473,7 +471,7 @@ The main operator does not currently expose an HTTP health endpoint. The ddo-rfc
 | | Concern | Recommendation |
 |---|---|---|
 | 🔑 | Cloudflare tokens | Use `API_TOKEN_FILE` with a Docker secret. Scope to `Zone.Zone:Read` + `Zone.DNS:Edit` on the specific zones only. |
-| 📡 | MikroTik creds | Dedicated RouterOS user with `dns` + `read` groups only, console/SSH denied. |
+| 📡 | MikroTik creds | Least-privilege RouterOS user that can manage `/ip/dns/static` via REST. Console, SSH, and Winbox access denied. |
 | 🏢 | Keytab (rfc2136) | Mount via Docker secret, never a world-readable bind mount. AD service account scoped to update only zones in `RFC2136_ZONES`. |
 | 🐳 | Docker socket | Mount `:ro`. Consider [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) in hostile multi-tenant environments. |
 | 🔓 | TLS | `MIKROTIK_SKIP_TLS_VERIFY=true` disables certificate validation. Trusted networks only. |
