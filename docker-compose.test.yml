@@ -11,13 +11,13 @@
 #                                       (see docs/rfc2136-integration-runbook.md
 #                                       in your local checkout, not git-tracked)
 #   2. ./test/krb5.conf               — points at your realm + KDCs
-#   3. transport image built          — `docker build -t docker-dns-operator-transport:dev transport-rfc2136/`
+#   3. sidecar image built            — `docker build -t ddo-rfc2136:dev sidecars/ddo-rfc2136/`
 #
 # Flip RFC2136_DRY_RUN to "false" once you've confirmed boot is clean.
 
 services:
-  transport:
-    image: docker-dns-operator-transport:dev
+  ddo-rfc2136:
+    image: ddo-rfc2136:dev
     environment:
       TRANSPORT_LISTEN: ":9090"
       RFC2136_KERBEROS_REALM: "CORP.EXAMPLE.COM"
@@ -33,18 +33,17 @@ services:
 
   external-dns:
     build: .
-    depends_on: [transport]
+    depends_on: [ddo-rfc2136]
     environment:
       LOG_LEVEL: "debug"
       PROJECT_LABEL: "docker-dns-operator"
       INSTANCE_ID: "1"
       EXECUTION_FREQUENCY_SECONDS: "30"
-      RFC2136_TRANSPORT_URL: "http://transport:9090"
+      RFC2136_WEBHOOK_URL: "http://ddo-rfc2136:9090"
       RFC2136_AUTH_MODE: "gss-tsig"
       RFC2136_HOSTS: "dc01.corp.example.com,dc02.corp.example.com"
       RFC2136_ZONES: "corp.example.com"
       RFC2136_KERBEROS_REALM: "CORP.EXAMPLE.COM"
       RFC2136_KERBEROS_PRINCIPAL: "svc-dns@CORP.EXAMPLE.COM"
-      RFC2136_KEYTAB_FILE: "/keytab/svc-dns.keytab"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro

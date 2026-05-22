@@ -6,7 +6,7 @@
  */
 import { createServer, Server } from 'http';
 import { AddressInfo } from 'net';
-import { Rfc2136TransportClient } from '../src/rfc2136/transport-client';
+import { Rfc2136WebhookClient } from '../src/rfc2136/webhook-client';
 
 describe('rfc2136 sidecar contract', () => {
   let server: Server;
@@ -48,7 +48,7 @@ describe('rfc2136 sidecar contract', () => {
         { name: 'a.example.com', type: 'A', ttl: 300, value: '10.0.0.1' },
       ],
     };
-    const client = new Rfc2136TransportClient(url, 5000);
+    const client = new Rfc2136WebhookClient(url, 5000);
     const res = await client.getRecords({
       host: 'dc01.corp.example.com',
       port: 53,
@@ -70,7 +70,7 @@ describe('rfc2136 sidecar contract', () => {
 
   it('POST /v1/apply request shape includes prereqs and changes verbatim', async () => {
     nextResponse = { ok: true };
-    const client = new Rfc2136TransportClient(url, 5000);
+    const client = new Rfc2136WebhookClient(url, 5000);
     await client.apply({
       host: 'dc01.corp.example.com',
       port: 53,
@@ -111,7 +111,7 @@ describe('rfc2136 sidecar contract', () => {
       message: 'prereq failed',
       retryable: false,
     };
-    const client = new Rfc2136TransportClient(url, 5000);
+    const client = new Rfc2136WebhookClient(url, 5000);
     const res = await client.apply({
       host: 'dc01.corp.example.com',
       port: 53,

@@ -42,7 +42,7 @@ graph LR
 
     OP --> CF["☁️ Cloudflare<br/>public DNS"]
     OP --> MT["📡 MikroTik<br/>RouterOS REST"]
-    OP --> TR["🔌 transport-rfc2136<br/>Kerberos / GSS-TSIG"]
+    OP --> TR["🔌 ddo-rfc2136<br/>Kerberos / GSS-TSIG"]
     TR --> AD["🏢 Active Directory<br/>DNS (RFC 2136)"]
 
     style DK fill:#2496ed,color:#fff,stroke:#2496ed
@@ -129,7 +129,7 @@ Supports A, AAAA, CNAME, MX, NS.
 
 ```mermaid
 graph LR
-    OP["🧭 operator"] -->|HTTP| TR["🔌 transport-rfc2136<br/>Go sidecar"]
+    OP["🧭 operator"] -->|HTTP| TR["🔌 ddo-rfc2136<br/>Go sidecar"]
     KT["🔑 keytab"] -->|kinit -kt| TR
     TR -->|GSS-TSIG signed| DC1["🏢 DC #1"]
     TR -->|GSS-TSIG signed| DC2["🏢 DC #2"]
@@ -143,7 +143,7 @@ graph LR
     style HC fill:#10b981,color:#fff,stroke:#10b981
 ```
 
-The Kerberos/TSIG protocol layer runs in a separate Go sidecar (`transport-rfc2136`). The sidecar runs `kinit -kt` against a keytab on startup, refreshes the TGT every `RFC2136_KINIT_REFRESH_INTERVAL`, signs UPDATE and AXFR with GSS-TSIG, and exposes `/healthz` (HTTP 503 with `{"kerberos":"expired"}` on refresh failure).
+The Kerberos/TSIG protocol layer runs in a separate Go sidecar (`ddo-rfc2136`). The sidecar runs `kinit -kt` against a keytab on startup, refreshes the TGT every `RFC2136_KINIT_REFRESH_INTERVAL`, signs UPDATE and AXFR with GSS-TSIG, and exposes `/healthz` (HTTP 503 with `{"kerberos":"expired"}` on refresh failure).
 
 The operator implements failover across multiple DCs (`RFC2136_HOSTS`) with a per-DC circuit breaker, per-zone DC pinning, and an AXFR-disabled mode (`RFC2136_AXFR_ENABLED=false`) for environments where zone transfers are denied.
 
@@ -205,7 +205,7 @@ Every required variable must be set, or the provider is silently skipped.
 
 | Variable | Default | Description |
 |---|---|---|
-| `RFC2136_TRANSPORT_URL` |  | URL of the rfc2136-transport sidecar, e.g. `http://transport:9090`. Probed at `<URL>/healthz` on startup. |
+| `RFC2136_WEBHOOK_URL` |  | URL of the ddo-rfc2136 sidecar, e.g. `http://ddo-rfc2136:9090`. Probed at `<URL>/healthz` on startup. |
 | `RFC2136_AUTH_MODE` |  | Only `gss-tsig` is supported. |
 | `RFC2136_HOSTS` |  | Comma-separated FQDNs of AD DCs in failover order. IPs and short names are rejected. |
 | `RFC2136_PORT` | `53` | UDP/TCP port for DNS UPDATE. |
@@ -223,7 +223,7 @@ Every required variable must be set, or the provider is silently skipped.
 | `RFC2136_DOMAIN_FILTER` |  | Comma-separated name suffixes. Restricts which entries are managed without narrowing `RFC2136_ZONES`. |
 | `RFC2136_KINIT_REFRESH_INTERVAL` | `12h` | Sidecar setting. How often the TGT is refreshed. Go duration syntax. |
 
-The keytab itself is consumed only by the sidecar. Its env vars (`RFC2136_KERBEROS_REALM`, `RFC2136_KERBEROS_PRINCIPAL`, `RFC2136_KEYTAB_FILE`, `RFC2136_KRB5_CONF`, `RFC2136_KINIT_REFRESH_INTERVAL`) are set on the `transport-rfc2136` container, not on the operator.
+The keytab itself is consumed only by the sidecar. Its env vars (`RFC2136_KERBEROS_REALM`, `RFC2136_KERBEROS_PRINCIPAL`, `RFC2136_KEYTAB_FILE`, `RFC2136_KRB5_CONF`, `RFC2136_KINIT_REFRESH_INTERVAL`) are set on the `ddo-rfc2136` container, not on the operator.
 
 </details>
 
@@ -381,7 +381,7 @@ services:
   dns-operator:
     image: mrkhachaturov/docker-dns-operator:latest
     environment:
-      RFC2136_TRANSPORT_URL: http://transport:9090
+      RFC2136_WEBHOOK_URL: http://ddo-rfc2136:9090
       RFC2136_AUTH_MODE: gss-tsig
       RFC2136_HOSTS: dc01.corp.example.com,dc02.corp.example.com
       RFC2136_ZONES: corp.example.com
@@ -390,8 +390,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
-  transport:
-    image: mrkhachaturov/docker-dns-operator-transport:latest
+  ddo-rfc2136:
+    image: mrkhachaturov/ddo-rfc2136:latest
     environment:
       RFC2136_KERBEROS_REALM: CORP.EXAMPLE.COM
       RFC2136_KERBEROS_PRINCIPAL: svc-dns@CORP.EXAMPLE.COM
@@ -456,7 +456,7 @@ services:
 
 ### 🩺 Health
 
-The main operator does not currently expose an HTTP health endpoint. The rfc2136-transport sidecar exposes `/healthz` on port 9090; HTTP 200 means Kerberos is alive, 503 means the TGT could not be refreshed.
+The main operator does not currently expose an HTTP health endpoint. The ddo-rfc2136 sidecar exposes `/healthz` on port 9090; HTTP 200 means Kerberos is alive, 503 means the TGT could not be refreshed.
 
 ### ⚠️ Failure modes worth knowing
 
@@ -499,7 +499,7 @@ yarn test:e2e           # 🐳 e2e (uses testcontainers, Docker required)
 
 Adding a new provider means implementing the `DnsProvider` interface in [src/providers/dns-provider.interface.ts](src/providers/dns-provider.interface.ts), registering it in [provider-registry.service.ts](src/providers/provider-registry.service.ts), wiring config in [app.configuration.ts](src/app.configuration.ts), and updating [app.module.ts](src/app.module.ts). Unit specs live next to the code; e2e specs live under `test/`.
 
-The rfc2136 sidecar lives in [transport-rfc2136/](transport-rfc2136/) as a separate Go module with its own build and tests.
+The rfc2136 sidecar lives in [ddo-rfc2136/](ddo-rfc2136/) as a separate Go module with its own build and tests.
 
 Conventions and architecture notes for AI assistants are in [CLAUDE.md](CLAUDE.md).
 

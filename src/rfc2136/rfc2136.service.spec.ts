@@ -3,13 +3,13 @@ import { createMock, DeepMocked } from '@golevelup/ts-jest';
 import { ConfigService } from '@nestjs/config';
 import { Rfc2136Service } from './rfc2136.service';
 import { Rfc2136Factory } from './rfc2136.factory';
-import { Rfc2136TransportClient } from './transport-client';
+import { Rfc2136WebhookClient } from './webhook-client';
 import { Rfc2136ProviderRecord } from './rfc2136-provider-record';
 import { ConsoleLoggerService } from '../logger.service';
 
 describe('Rfc2136Service', () => {
   let service: Rfc2136Service;
-  let transport: DeepMocked<Rfc2136TransportClient>;
+  let webhook: DeepMocked<Rfc2136WebhookClient>;
   let factory: DeepMocked<Rfc2136Factory>;
   let config: DeepMocked<ConfigService>;
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -20,8 +20,8 @@ describe('Rfc2136Service', () => {
       providers: [
         Rfc2136Service,
         {
-          provide: Rfc2136TransportClient,
-          useValue: createMock<Rfc2136TransportClient>(),
+          provide: Rfc2136WebhookClient,
+          useValue: createMock<Rfc2136WebhookClient>(),
         },
         { provide: Rfc2136Factory, useValue: createMock<Rfc2136Factory>() },
         { provide: ConfigService, useValue: createMock<ConfigService>() },
@@ -32,7 +32,7 @@ describe('Rfc2136Service', () => {
       ],
     }).compile();
     service = mod.get(Rfc2136Service);
-    transport = mod.get(Rfc2136TransportClient);
+    webhook = mod.get(Rfc2136WebhookClient);
     factory = mod.get(Rfc2136Factory);
     config = mod.get(ConfigService);
     logger = mod.get(ConsoleLoggerService);
@@ -50,7 +50,7 @@ describe('Rfc2136Service', () => {
         (key: string) =>
           (
             ({
-              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_WEBHOOK_URL: 'http://ddo-rfc2136:9090',
               RFC2136_AUTH_MODE: 'gss-tsig',
               RFC2136_HOSTS: 'dc01.corp.example.com',
               RFC2136_ZONES: 'corp.example.com',
@@ -81,7 +81,7 @@ describe('Rfc2136Service', () => {
         (key: string) =>
           (
             ({
-              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_WEBHOOK_URL: 'http://ddo-rfc2136:9090',
               RFC2136_AUTH_MODE: 'gss-tsig',
               RFC2136_HOSTS: 'dc01.corp.example.com',
               RFC2136_ZONES: 'corp.example.com',
@@ -94,7 +94,7 @@ describe('Rfc2136Service', () => {
     });
 
     it('resolves when sidecar reports kerberos ready on first try', async () => {
-      transport.health.mockResolvedValue({
+      webhook.health.mockResolvedValue({
         ok: true,
         kerberos: 'ready',
         detail: '',
@@ -103,11 +103,11 @@ describe('Rfc2136Service', () => {
     });
 
     it('retries and eventually throws if sidecar never reaches ready', async () => {
-      transport.health.mockResolvedValue({ ok: false, detail: 'starting' });
+      webhook.health.mockResolvedValue({ ok: false, detail: 'starting' });
       await expect(service.probeSidecar(3, 1)).rejects.toThrow(
         /never returned ready/,
       );
-      expect(transport.health).toHaveBeenCalledTimes(3);
+      expect(webhook.health).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -117,7 +117,7 @@ describe('Rfc2136Service', () => {
         (key: string) =>
           (
             ({
-              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_WEBHOOK_URL: 'http://ddo-rfc2136:9090',
               RFC2136_AUTH_MODE: 'gss-tsig',
               RFC2136_HOSTS: 'dc01.corp.example.com,dc02.corp.example.com',
               RFC2136_PORT: 53,
@@ -133,7 +133,7 @@ describe('Rfc2136Service', () => {
     });
 
     it('pins first successful DC per zone', async () => {
-      transport.getRecords.mockImplementation(async (req) => {
+      webhook.getRecords.mockImplementation(async (req) => {
         if (
           req.host === 'dc01.corp.example.com' &&
           req.zone === 'zone-a.example.com'
@@ -176,7 +176,7 @@ describe('Rfc2136Service', () => {
     });
 
     it('marks zone unhealthy when all DCs fail AXFR', async () => {
-      transport.getRecords.mockResolvedValue({
+      webhook.getRecords.mockResolvedValue({
         ok: false,
         phase: 'dns-send',
         message: 'timeout',
@@ -192,7 +192,7 @@ describe('Rfc2136Service', () => {
     });
 
     it('caches successful AXFR records per zone', async () => {
-      transport.getRecords.mockResolvedValue({
+      webhook.getRecords.mockResolvedValue({
         ok: true,
         records: [
           {
@@ -210,7 +210,7 @@ describe('Rfc2136Service', () => {
     });
 
     it('resets per-cycle state on each call', async () => {
-      transport.getRecords.mockResolvedValue({ ok: true, records: [] });
+      webhook.getRecords.mockResolvedValue({ ok: true, records: [] });
       await service.prepareForJob();
       (service as any).unhealthyZonesThisCycle.add('zone-a.example.com');
       (service as any).pinnedDcForZone.set(
@@ -226,7 +226,7 @@ describe('Rfc2136Service', () => {
         'dc01.corp.example.com',
         Date.now() + 60_000,
       );
-      transport.getRecords.mockImplementation(async (req) => {
+      webhook.getRecords.mockImplementation(async (req) => {
         if (req.host === 'dc01.corp.example.com') {
           throw new Error('should not be called — circuit open');
         }
@@ -239,7 +239,7 @@ describe('Rfc2136Service', () => {
     });
 
     it('counts a multi-zone failure as ONE consecutive cycle failure for the DC', async () => {
-      transport.getRecords.mockImplementation(async (req) =>
+      webhook.getRecords.mockImplementation(async (req) =>
         req.host === 'dc01.corp.example.com'
           ? {
               ok: false,
@@ -259,7 +259,7 @@ describe('Rfc2136Service', () => {
     });
 
     it('opens circuit on DC after N consecutive cycles of failure', async () => {
-      transport.getRecords.mockImplementation(async (req) =>
+      webhook.getRecords.mockImplementation(async (req) =>
         req.host === 'dc01.corp.example.com'
           ? {
               ok: false,
@@ -279,7 +279,7 @@ describe('Rfc2136Service', () => {
 
     it('resets consecutive cycle count on any successful AXFR for the DC', async () => {
       (service as any).dcConsecutiveFailures.set('dc01.corp.example.com', 2);
-      transport.getRecords.mockResolvedValue({ ok: true, records: [] });
+      webhook.getRecords.mockResolvedValue({ ok: true, records: [] });
       await service.prepareForJob();
       expect(
         (service as any).dcConsecutiveFailures.get('dc01.corp.example.com'),
@@ -293,7 +293,7 @@ describe('Rfc2136Service', () => {
         (key: string) =>
           (
             ({
-              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_WEBHOOK_URL: 'http://ddo-rfc2136:9090',
               RFC2136_AUTH_MODE: 'gss-tsig',
               RFC2136_HOSTS: 'dc01.corp.example.com',
               RFC2136_PORT: 53,
@@ -395,7 +395,7 @@ describe('Rfc2136Service', () => {
         (key: string) =>
           (
             ({
-              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_WEBHOOK_URL: 'http://ddo-rfc2136:9090',
               RFC2136_AUTH_MODE: 'gss-tsig',
               RFC2136_HOSTS: 'dc01.corp.example.com',
               RFC2136_PORT: 53,
@@ -416,7 +416,7 @@ describe('Rfc2136Service', () => {
       );
     });
 
-    it('calls transport.apply on pinned DC with factory output', async () => {
+    it('calls webhook.apply on pinned DC with factory output', async () => {
       factory.buildCreateChangeSet.mockReturnValue({
         prerequisites: [
           { kind: 'NXRRSET', name: 'app.zone-a.example.com', type: 'A' },
@@ -433,7 +433,7 @@ describe('Rfc2136Service', () => {
           },
         ],
       });
-      transport.apply.mockResolvedValue({ ok: true });
+      webhook.apply.mockResolvedValue({ ok: true });
 
       const { DnsaEntry } = await import('../dto/dnsa-entry');
       const entry = Object.assign(new DnsaEntry(), {
@@ -442,7 +442,7 @@ describe('Rfc2136Service', () => {
       });
       await service.createEntry(entry);
 
-      expect(transport.apply).toHaveBeenCalledWith(
+      expect(webhook.apply).toHaveBeenCalledWith(
         expect.objectContaining({
           host: 'dc01.corp.example.com',
           zone: 'zone-a.example.com',
@@ -461,7 +461,7 @@ describe('Rfc2136Service', () => {
         address: '10.0.0.1',
       });
       await service.createEntry(entry);
-      expect(transport.apply).not.toHaveBeenCalled();
+      expect(webhook.apply).not.toHaveBeenCalled();
     });
 
     it('skips when AXFR cache shows an unowned record at target name+type', async () => {
@@ -479,7 +479,7 @@ describe('Rfc2136Service', () => {
         address: '10.0.0.1',
       });
       await service.createEntry(entry);
-      expect(transport.apply).not.toHaveBeenCalled();
+      expect(webhook.apply).not.toHaveBeenCalled();
     });
 
     it('marks zone unhealthy on write failure (so siblings will be skipped)', async () => {
@@ -487,7 +487,7 @@ describe('Rfc2136Service', () => {
         prerequisites: [],
         changes: [],
       });
-      transport.apply.mockResolvedValue({
+      webhook.apply.mockResolvedValue({
         ok: false,
         rcode: 'SERVFAIL',
         phase: 'dns-receive',
@@ -513,7 +513,7 @@ describe('Rfc2136Service', () => {
         address: '10.0.0.1',
       });
       await expect(service.createEntry(entry)).resolves.toBeUndefined();
-      expect(transport.apply).not.toHaveBeenCalled();
+      expect(webhook.apply).not.toHaveBeenCalled();
     });
   });
 
@@ -523,7 +523,7 @@ describe('Rfc2136Service', () => {
         (key: string) =>
           (
             ({
-              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_WEBHOOK_URL: 'http://ddo-rfc2136:9090',
               RFC2136_AUTH_MODE: 'gss-tsig',
               RFC2136_HOSTS: 'dc01.corp.example.com',
               RFC2136_PORT: 53,
@@ -542,7 +542,7 @@ describe('Rfc2136Service', () => {
       );
     });
 
-    it('calls transport.apply with factory update change set', async () => {
+    it('calls webhook.apply with factory update change set', async () => {
       const oldRec = new Rfc2136ProviderRecord(
         {
           name: 'app.zone-a.example.com',
@@ -583,7 +583,7 @@ describe('Rfc2136Service', () => {
           },
         ],
       });
-      transport.apply.mockResolvedValue({ ok: true });
+      webhook.apply.mockResolvedValue({ ok: true });
 
       const { DnsaEntry } = await import('../dto/dnsa-entry');
       const desired = Object.assign(new DnsaEntry(), {
@@ -591,7 +591,7 @@ describe('Rfc2136Service', () => {
         address: '10.0.0.99',
       });
       await service.updateEntry(oldRec, desired);
-      expect(transport.apply).toHaveBeenCalled();
+      expect(webhook.apply).toHaveBeenCalled();
     });
 
     it('skips when zone is unhealthy', async () => {
@@ -612,7 +612,7 @@ describe('Rfc2136Service', () => {
         address: '10.0.0.99',
       });
       await service.updateEntry(oldRec, desired);
-      expect(transport.apply).not.toHaveBeenCalled();
+      expect(webhook.apply).not.toHaveBeenCalled();
     });
   });
 
@@ -622,7 +622,7 @@ describe('Rfc2136Service', () => {
         (key: string) =>
           (
             ({
-              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_WEBHOOK_URL: 'http://ddo-rfc2136:9090',
               RFC2136_AUTH_MODE: 'gss-tsig',
               RFC2136_HOSTS: 'dc01.corp.example.com',
               RFC2136_PORT: 53,
@@ -641,7 +641,7 @@ describe('Rfc2136Service', () => {
       );
     });
 
-    it('calls transport.apply with factory delete change set', async () => {
+    it('calls webhook.apply with factory delete change set', async () => {
       const oldRec = new Rfc2136ProviderRecord(
         {
           name: 'app.zone-a.example.com',
@@ -682,9 +682,9 @@ describe('Rfc2136Service', () => {
           },
         ],
       });
-      transport.apply.mockResolvedValue({ ok: true });
+      webhook.apply.mockResolvedValue({ ok: true });
       await service.deleteEntry(oldRec);
-      expect(transport.apply).toHaveBeenCalled();
+      expect(webhook.apply).toHaveBeenCalled();
     });
   });
 
@@ -694,7 +694,7 @@ describe('Rfc2136Service', () => {
         (key: string) =>
           (
             ({
-              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_WEBHOOK_URL: 'http://ddo-rfc2136:9090',
               RFC2136_AUTH_MODE: 'gss-tsig',
               RFC2136_HOSTS:
                 'dc01.corp.example.com,dc02.corp.example.com,dc03.corp.example.com',
@@ -726,7 +726,7 @@ describe('Rfc2136Service', () => {
     });
 
     it('retries on next DC after first returns REFUSED — succeeds on DC2', async () => {
-      transport.apply.mockImplementation(async (req) => {
+      webhook.apply.mockImplementation(async (req) => {
         if (req.host === 'dc01.corp.example.com') {
           return {
             ok: false,
@@ -746,13 +746,13 @@ describe('Rfc2136Service', () => {
       });
       await service.createEntry(entry);
 
-      expect(transport.apply).toHaveBeenCalledTimes(2);
-      expect(transport.apply).toHaveBeenNthCalledWith(
+      expect(webhook.apply).toHaveBeenCalledTimes(2);
+      expect(webhook.apply).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({ host: 'dc01.corp.example.com' }),
         expect.any(Number),
       );
-      expect(transport.apply).toHaveBeenNthCalledWith(
+      expect(webhook.apply).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({ host: 'dc02.corp.example.com' }),
         expect.any(Number),
@@ -767,7 +767,7 @@ describe('Rfc2136Service', () => {
     });
 
     it('marks zone unhealthy after ALL DCs exhausted', async () => {
-      transport.apply.mockResolvedValue({
+      webhook.apply.mockResolvedValue({
         ok: false,
         rcode: 'SERVFAIL',
         phase: 'dns-receive',
@@ -782,14 +782,14 @@ describe('Rfc2136Service', () => {
       });
       await service.createEntry(entry);
 
-      expect(transport.apply).toHaveBeenCalledTimes(3);
+      expect(webhook.apply).toHaveBeenCalledTimes(3);
       expect(
         (service as any).unhealthyZonesThisCycle.has('zone-a.example.com'),
       ).toBe(true);
     });
 
     it('does not failover on non-retryable, non-failover-eligible failure (e.g. NXRRSET)', async () => {
-      transport.apply.mockResolvedValue({
+      webhook.apply.mockResolvedValue({
         ok: false,
         rcode: 'NXRRSET',
         phase: 'dns-receive',
@@ -804,7 +804,7 @@ describe('Rfc2136Service', () => {
       });
       await service.createEntry(entry);
 
-      expect(transport.apply).toHaveBeenCalledTimes(1);
+      expect(webhook.apply).toHaveBeenCalledTimes(1);
       expect(
         (service as any).unhealthyZonesThisCycle.has('zone-a.example.com'),
       ).toBe(true);
@@ -817,7 +817,7 @@ describe('Rfc2136Service', () => {
         (key: string) =>
           (
             ({
-              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_WEBHOOK_URL: 'http://ddo-rfc2136:9090',
               RFC2136_AUTH_MODE: 'gss-tsig',
               RFC2136_HOSTS: 'dc01.corp.example.com',
               RFC2136_PORT: 53,
@@ -835,7 +835,7 @@ describe('Rfc2136Service', () => {
     });
 
     it('detects orphan ownership TXT during prepareForJob and createEntry omits NXRRSET-TXT prereq', async () => {
-      transport.getRecords.mockResolvedValue({
+      webhook.getRecords.mockResolvedValue({
         ok: true,
         records: [
           {
@@ -869,7 +869,7 @@ describe('Rfc2136Service', () => {
           },
         ],
       });
-      transport.apply.mockResolvedValue({ ok: true });
+      webhook.apply.mockResolvedValue({ ok: true });
 
       const { DnsaEntry } = await import('../dto/dnsa-entry');
       const entry = Object.assign(new DnsaEntry(), {
@@ -883,7 +883,7 @@ describe('Rfc2136Service', () => {
         undefined,
         expect.objectContaining({ skipOwnershipTxtPrereq: true }),
       );
-      expect(transport.apply).toHaveBeenCalled();
+      expect(webhook.apply).toHaveBeenCalled();
     });
   });
 
@@ -893,7 +893,7 @@ describe('Rfc2136Service', () => {
         (key: string) =>
           (
             ({
-              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_WEBHOOK_URL: 'http://ddo-rfc2136:9090',
               RFC2136_AUTH_MODE: 'gss-tsig',
               RFC2136_HOSTS: 'dc01.corp.example.com',
               RFC2136_PORT: 53,
@@ -929,7 +929,7 @@ describe('Rfc2136Service', () => {
         address: '10.0.0.1',
       });
       await service.createEntry(entry);
-      expect(transport.apply).not.toHaveBeenCalled();
+      expect(webhook.apply).not.toHaveBeenCalled();
     });
 
     it('skips CNAME create when AXFR shows any other type at the same name', async () => {
@@ -948,7 +948,7 @@ describe('Rfc2136Service', () => {
         target: 'other.example.com',
       });
       await service.createEntry(entry);
-      expect(transport.apply).not.toHaveBeenCalled();
+      expect(webhook.apply).not.toHaveBeenCalled();
     });
   });
 
@@ -958,7 +958,7 @@ describe('Rfc2136Service', () => {
         (key: string) =>
           (
             ({
-              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_WEBHOOK_URL: 'http://ddo-rfc2136:9090',
               RFC2136_AUTH_MODE: 'gss-tsig',
               RFC2136_HOSTS: 'dc01.corp.example.com',
               RFC2136_PORT: 53,
@@ -998,7 +998,7 @@ describe('Rfc2136Service', () => {
         address: '10.0.0.1',
       });
       await service.createEntry(entry);
-      expect(transport.apply).not.toHaveBeenCalled();
+      expect(webhook.apply).not.toHaveBeenCalled();
     });
 
     it('rejects updateEntry outside the filter', async () => {
@@ -1018,7 +1018,7 @@ describe('Rfc2136Service', () => {
         address: '10.0.0.99',
       });
       await service.updateEntry(oldRec, desired);
-      expect(transport.apply).not.toHaveBeenCalled();
+      expect(webhook.apply).not.toHaveBeenCalled();
     });
 
     it('rejects deleteEntry outside the filter', async () => {
@@ -1033,7 +1033,7 @@ describe('Rfc2136Service', () => {
         { defaultTtl: 3600, minTtl: 60 },
       );
       await service.deleteEntry(oldRec);
-      expect(transport.apply).not.toHaveBeenCalled();
+      expect(webhook.apply).not.toHaveBeenCalled();
     });
 
     it('filters out records outside the filter in getRecords', async () => {
@@ -1069,14 +1069,14 @@ describe('Rfc2136Service', () => {
     });
 
     it('allows createEntry inside the filter', async () => {
-      transport.apply.mockResolvedValue({ ok: true });
+      webhook.apply.mockResolvedValue({ ok: true });
       const { DnsaEntry } = await import('../dto/dnsa-entry');
       const entry = Object.assign(new DnsaEntry(), {
         name: 'web.containers.zone-a.example.com',
         address: '10.0.0.1',
       });
       await service.createEntry(entry);
-      expect(transport.apply).toHaveBeenCalled();
+      expect(webhook.apply).toHaveBeenCalled();
     });
   });
 
@@ -1086,7 +1086,7 @@ describe('Rfc2136Service', () => {
         (key: string) =>
           (
             ({
-              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_WEBHOOK_URL: 'http://ddo-rfc2136:9090',
               RFC2136_AUTH_MODE: 'gss-tsig',
               RFC2136_HOSTS: 'dc01.corp.example.com,dc02.corp.example.com',
               RFC2136_PORT: 53,
@@ -1104,7 +1104,7 @@ describe('Rfc2136Service', () => {
 
     it('prepareForJob skips AXFR and deterministically pins first available DC', async () => {
       await service.prepareForJob();
-      expect(transport.getRecords).not.toHaveBeenCalled();
+      expect(webhook.getRecords).not.toHaveBeenCalled();
       expect((service as any).pinnedDcForZone.get('zone-a.example.com')).toBe(
         'dc01.corp.example.com',
       );
@@ -1134,7 +1134,7 @@ describe('Rfc2136Service', () => {
           },
         ],
       });
-      transport.apply.mockResolvedValue({ ok: true });
+      webhook.apply.mockResolvedValue({ ok: true });
 
       const { DnsaEntry } = await import('../dto/dnsa-entry');
       const entry = Object.assign(new DnsaEntry(), {
@@ -1142,7 +1142,7 @@ describe('Rfc2136Service', () => {
         address: '10.0.0.1',
       });
       await service.createEntry(entry);
-      expect(transport.apply).toHaveBeenCalled();
+      expect(webhook.apply).toHaveBeenCalled();
     });
   });
 });

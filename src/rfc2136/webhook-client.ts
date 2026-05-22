@@ -7,7 +7,7 @@ import {
   RecordsResponse,
 } from './types';
 
-export class Rfc2136TransportClient {
+export class Rfc2136WebhookClient {
   constructor(
     private readonly baseUrl: string,
     private readonly defaultTimeoutMs: number,
@@ -60,7 +60,7 @@ export class Rfc2136TransportClient {
         return {
           ok: false,
           phase: 'dns-send',
-          message: `transport HTTP ${statusCode}`,
+          message: `webhook HTTP ${statusCode}`,
           retryable: true,
         } as unknown as T;
       }
@@ -68,7 +68,7 @@ export class Rfc2136TransportClient {
         return {
           ok: false,
           phase: 'dns-send',
-          message: `transport HTTP ${statusCode}`,
+          message: `webhook HTTP ${statusCode}`,
           retryable: false,
         } as unknown as T;
       }

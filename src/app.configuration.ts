@@ -61,7 +61,7 @@ export const validationSchema = Joi.object({
   MIKROTIK_DEFAULT_TTL: Joi.number().integer().min(1).default(3600),
 
   // RFC2136 — all optional at schema level; partial config guard below
-  RFC2136_TRANSPORT_URL: Joi.string()
+  RFC2136_WEBHOOK_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .optional(),
   RFC2136_AUTH_MODE: Joi.string().valid('gss-tsig').optional(),
@@ -137,7 +137,7 @@ export const validationSchema = Joi.object({
   .custom((value, helpers) => {
     // Partial RFC2136 config check: all-or-nothing
     const required = [
-      'RFC2136_TRANSPORT_URL',
+      'RFC2136_WEBHOOK_URL',
       'RFC2136_AUTH_MODE',
       'RFC2136_HOSTS',
       'RFC2136_ZONES',
@@ -288,7 +288,7 @@ export interface IConfiguration {
   MIKROTIK_PASSWORD_FILE?: string;
   MIKROTIK_SKIP_TLS_VERIFY: boolean;
   MIKROTIK_DEFAULT_TTL: number;
-  RFC2136_TRANSPORT_URL?: string;
+  RFC2136_WEBHOOK_URL?: string;
   RFC2136_AUTH_MODE?: 'gss-tsig';
   RFC2136_HOSTS?: string;
   RFC2136_PORT: number;

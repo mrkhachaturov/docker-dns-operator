@@ -11,7 +11,7 @@ import { IProviderRecord } from '../providers/provider-record.interface';
 import { ConsoleLoggerService } from '../logger.service';
 import { Rfc2136Factory } from './rfc2136.factory';
 import { Rfc2136ProviderRecord } from './rfc2136-provider-record';
-import { Rfc2136TransportClient } from './transport-client';
+import { Rfc2136WebhookClient } from './webhook-client';
 import { ZoneQueue } from './zone-queue';
 import {
   ApplyRequest,
@@ -21,7 +21,7 @@ import {
 } from './types';
 
 interface ResolvedConfig {
-  transportUrl: string;
+  webhookUrl: string;
   authMode: 'gss-tsig';
   hosts: string[];
   port: number;
@@ -32,7 +32,7 @@ interface ResolvedConfig {
   updateTimeoutMs: number;
   circuitBreakerThreshold: number;
   dryRun: boolean;
-  taxfr: boolean;
+  axfrEnabled: boolean;
   domainFilter: string[];
 }
 
@@ -66,14 +66,14 @@ export class Rfc2136Service implements IDnsProvider {
 
   constructor(
     private readonly config: ConfigService,
-    private readonly transport: Rfc2136TransportClient,
+    private readonly webhook: Rfc2136WebhookClient,
     private readonly factory: Rfc2136Factory,
     private readonly logger: ConsoleLoggerService,
   ) {}
 
   isConfigured(): boolean {
     const required = [
-      'RFC2136_TRANSPORT_URL',
+      'RFC2136_WEBHOOK_URL',
       'RFC2136_AUTH_MODE',
       'RFC2136_HOSTS',
       'RFC2136_ZONES',
@@ -87,7 +87,7 @@ export class Rfc2136Service implements IDnsProvider {
     if (!this.isConfigured()) return;
     const domainFilterRaw = this.config.get<string>('RFC2136_DOMAIN_FILTER');
     this.resolved = {
-      transportUrl: this.config.get<string>('RFC2136_TRANSPORT_URL')!,
+      webhookUrl: this.config.get<string>('RFC2136_WEBHOOK_URL')!,
       authMode: 'gss-tsig',
       hosts: this.config
         .get<string>('RFC2136_HOSTS')!
@@ -108,7 +108,7 @@ export class Rfc2136Service implements IDnsProvider {
         this.config.get('RFC2136_CIRCUIT_BREAKER_THRESHOLD') ?? 3,
       ),
       dryRun: this.config.get<boolean>('RFC2136_DRY_RUN') === true,
-      taxfr: this.config.get<boolean>('RFC2136_AXFR_ENABLED') !== false,
+      axfrEnabled: this.config.get<boolean>('RFC2136_AXFR_ENABLED') !== false,
       domainFilter: domainFilterRaw
         ? domainFilterRaw
             .split(',')
@@ -122,7 +122,7 @@ export class Rfc2136Service implements IDnsProvider {
     this.ownershipLabel = `${projectLabel}:${instanceId}`;
     this.zoneQueue.setGate((zone) => !this.unhealthyZonesThisCycle.has(zone));
     this.logger.log(
-      `[rfc2136] initialised — hosts=${this.resolved.hosts.join(',')} zones=${this.resolved.zones.join(',')} taxfr=${this.resolved.taxfr}${this.resolved.domainFilter.length ? ` domain-filter=${this.resolved.domainFilter.join(',')}` : ''}`,
+      `[rfc2136] initialised — hosts=${this.resolved.hosts.join(',')} zones=${this.resolved.zones.join(',')} axfrEnabled=${this.resolved.axfrEnabled}${this.resolved.domainFilter.length ? ` domain-filter=${this.resolved.domainFilter.join(',')}` : ''}`,
     );
   }
 
@@ -130,7 +130,7 @@ export class Rfc2136Service implements IDnsProvider {
   async probeSidecar(maxAttempts = 5, backoffMs = 2000): Promise<void> {
     for (let i = 1; i <= maxAttempts; i += 1) {
       // eslint-disable-next-line no-await-in-loop
-      const res = await this.transport.health(5_000);
+      const res = await this.webhook.health(5_000);
       if ('kerberos' in res && res.ok && res.kerberos === 'ready') return;
       this.logger.warn(
         `[rfc2136] sidecar healthz attempt ${i}/${maxAttempts} not ready: ${JSON.stringify(res)}`,
@@ -167,7 +167,7 @@ export class Rfc2136Service implements IDnsProvider {
     });
     this.availableDcsThisCycle = availableDcs;
 
-    if (!this.resolved.taxfr) {
+    if (!this.resolved.axfrEnabled) {
       // AXFR disabled — pin first available DC per zone deterministically.
       // No reads — we rely on UPDATE prerequisites for collision detection.
       if (availableDcs.length === 0) {
@@ -197,7 +197,7 @@ export class Rfc2136Service implements IDnsProvider {
       for (const dc of availableDcs) {
         dcTriedThisCycle.add(dc);
         // eslint-disable-next-line no-await-in-loop
-        const res = await this.transport.getRecords(
+        const res = await this.webhook.getRecords(
           { host: dc, port: this.resolved.port, zone },
           this.resolved.axfrTimeoutMs,
         );
@@ -282,7 +282,7 @@ export class Rfc2136Service implements IDnsProvider {
 
   async getRecords(): Promise<IProviderRecord[]> {
     if (!this.resolved) return [];
-    if (!this.resolved.taxfr) return [];
+    if (!this.resolved.axfrEnabled) return [];
 
     const ownershipValue = `"owned-by=${this.ownershipLabel}"`;
     const out: Rfc2136ProviderRecord[] = [];
@@ -364,7 +364,7 @@ export class Rfc2136Service implements IDnsProvider {
 
       // Collision detection: only meaningful when AXFR is enabled.
       // RFC 1034 §3.6.2: CNAME is mutually exclusive with all other types at the same name.
-      if (this.resolved!.taxfr) {
+      if (this.resolved!.axfrEnabled) {
         const sameName = raw.filter(
           (r) => r.name.toLowerCase() === entry.name.toLowerCase(),
         );
@@ -504,7 +504,7 @@ export class Rfc2136Service implements IDnsProvider {
     // eslint-disable-next-line no-restricted-syntax
     for (const dc of order) {
       // eslint-disable-next-line no-await-in-loop
-      const res = await this.transport.apply(
+      const res = await this.webhook.apply(
         {
           host: dc,
           port: this.resolved!.port,

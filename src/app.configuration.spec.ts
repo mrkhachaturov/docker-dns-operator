@@ -509,7 +509,7 @@ describe('App Configuration', () => {
 
   describe('RFC2136 configuration', () => {
     const rfc2136Keys = [
-      'RFC2136_TRANSPORT_URL',
+      'RFC2136_WEBHOOK_URL',
       'RFC2136_AUTH_MODE',
       'RFC2136_HOSTS',
       'RFC2136_PORT',
@@ -542,7 +542,7 @@ describe('App Configuration', () => {
     });
 
     function setValidRfc2136Env() {
-      process.env.RFC2136_TRANSPORT_URL = 'http://transport:9090';
+      process.env.RFC2136_WEBHOOK_URL = 'http://ddo-rfc2136:9090';
       process.env.RFC2136_AUTH_MODE = 'gss-tsig';
       process.env.RFC2136_HOSTS = 'dc01.corp.example.com,dc02.corp.example.com';
       process.env.RFC2136_ZONES = 'corp.example.com';
@@ -555,8 +555,8 @@ describe('App Configuration', () => {
 
       const sut = await getSystemUnderTest();
 
-      expect(sut.get('RFC2136_TRANSPORT_URL', { infer: true })).toBe(
-        'http://transport:9090',
+      expect(sut.get('RFC2136_WEBHOOK_URL', { infer: true })).toBe(
+        'http://ddo-rfc2136:9090',
       );
       expect(sut.get('RFC2136_AUTH_MODE', { infer: true })).toBe('gss-tsig');
       expect(sut.get('RFC2136_PORT', { infer: true })).toBe(53);
@@ -576,7 +576,7 @@ describe('App Configuration', () => {
     });
 
     it('throws on partial RFC2136 config', async () => {
-      process.env.RFC2136_TRANSPORT_URL = 'http://transport:9090';
+      process.env.RFC2136_WEBHOOK_URL = 'http://ddo-rfc2136:9090';
       process.env.RFC2136_AUTH_MODE = 'gss-tsig';
       // missing HOSTS, ZONES, REALM, PRINCIPAL, KEYTAB_FILE
 

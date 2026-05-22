@@ -16,7 +16,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ConsoleLoggerService } from '../src/logger.service';
 import { Rfc2136Service } from '../src/rfc2136/rfc2136.service';
 import { Rfc2136Factory } from '../src/rfc2136/rfc2136.factory';
-import { Rfc2136TransportClient } from '../src/rfc2136/transport-client';
+import { Rfc2136WebhookClient } from '../src/rfc2136/webhook-client';
 import { DnsaEntry } from '../src/dto/dnsa-entry';
 import { DNSTypes } from '../src/dto/dnsbase-entry';
 
@@ -80,7 +80,7 @@ describe('Rfc2136Service e2e', () => {
     mockState = { axfrResponses: {}, applyResponses: [], applyCalls: [] };
     mockSidecar = await makeMockSidecar(mockState);
 
-    process.env.RFC2136_TRANSPORT_URL = mockSidecar.url;
+    process.env.RFC2136_WEBHOOK_URL = mockSidecar.url;
     process.env.RFC2136_AUTH_MODE = 'gss-tsig';
     process.env.RFC2136_HOSTS = 'dc01.corp.example.com,dc02.corp.example.com';
     process.env.RFC2136_PORT = '53';
@@ -106,8 +106,8 @@ describe('Rfc2136Service e2e', () => {
             }),
         },
         {
-          provide: Rfc2136TransportClient,
-          useFactory: () => new Rfc2136TransportClient(mockSidecar.url, 5000),
+          provide: Rfc2136WebhookClient,
+          useFactory: () => new Rfc2136WebhookClient(mockSidecar.url, 5000),
         },
         {
           provide: ConsoleLoggerService,

@@ -8,7 +8,7 @@ import { MikrotikService } from './mikrotik/mikrotik.service';
 import { MikrotikFactory } from './mikrotik/mikrotik.factory';
 import { Rfc2136Service } from './rfc2136/rfc2136.service';
 import { Rfc2136Factory } from './rfc2136/rfc2136.factory';
-import { Rfc2136TransportClient } from './rfc2136/transport-client';
+import { Rfc2136WebhookClient } from './rfc2136/webhook-client';
 import { AppService } from './app.service';
 import { ConsoleLoggerService } from './logger.service';
 import { DdnsService } from './ddns/ddns.service';
@@ -37,11 +37,10 @@ import { ProviderRegistry } from './providers/provider-registry.service';
       inject: [ConfigService],
     },
     {
-      provide: Rfc2136TransportClient,
+      provide: Rfc2136WebhookClient,
       useFactory: (config: ConfigService) =>
-        new Rfc2136TransportClient(
-          config.get<string>('RFC2136_TRANSPORT_URL') ??
-            'http://localhost:9090',
+        new Rfc2136WebhookClient(
+          config.get<string>('RFC2136_WEBHOOK_URL') ?? 'http://localhost:9090',
           Number(config.get('RFC2136_UPDATE_TIMEOUT_SECONDS') ?? 15) * 1000,
         ),
       inject: [ConfigService],

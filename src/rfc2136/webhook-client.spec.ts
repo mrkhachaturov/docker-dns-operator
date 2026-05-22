@@ -1,7 +1,7 @@
 import { MockAgent, setGlobalDispatcher } from 'undici';
-import { Rfc2136TransportClient } from './transport-client';
+import { Rfc2136WebhookClient } from './webhook-client';
 
-describe('Rfc2136TransportClient', () => {
+describe('Rfc2136WebhookClient', () => {
   let agent: MockAgent;
 
   beforeEach(() => {
@@ -12,7 +12,7 @@ describe('Rfc2136TransportClient', () => {
 
   it('returns records on ok response', async () => {
     agent
-      .get('http://transport:9090')
+      .get('http://ddo-rfc2136:9090')
       .intercept({ path: '/v1/records', method: 'POST' })
       .reply(200, {
         ok: true,
@@ -21,7 +21,7 @@ describe('Rfc2136TransportClient', () => {
         ],
       });
 
-    const client = new Rfc2136TransportClient('http://transport:9090', 30_000);
+    const client = new Rfc2136WebhookClient('http://ddo-rfc2136:9090', 30_000);
     const result = await client.getRecords({
       host: 'dc01.corp.example.com',
       port: 53,
@@ -33,7 +33,7 @@ describe('Rfc2136TransportClient', () => {
 
   it('returns a typed failure on ok:false response', async () => {
     agent
-      .get('http://transport:9090')
+      .get('http://ddo-rfc2136:9090')
       .intercept({ path: '/v1/records', method: 'POST' })
       .reply(200, {
         ok: false,
@@ -42,7 +42,7 @@ describe('Rfc2136TransportClient', () => {
         retryable: false,
       });
 
-    const client = new Rfc2136TransportClient('http://transport:9090', 30_000);
+    const client = new Rfc2136WebhookClient('http://ddo-rfc2136:9090', 30_000);
     const result = await client.getRecords({
       host: 'dc01.corp.example.com',
       port: 53,
@@ -57,11 +57,11 @@ describe('Rfc2136TransportClient', () => {
 
   it('maps a non-200 HTTP status to a retryable failure', async () => {
     agent
-      .get('http://transport:9090')
+      .get('http://ddo-rfc2136:9090')
       .intercept({ path: '/v1/records', method: 'POST' })
       .reply(503, 'service unavailable');
 
-    const client = new Rfc2136TransportClient('http://transport:9090', 30_000);
+    const client = new Rfc2136WebhookClient('http://ddo-rfc2136:9090', 30_000);
     const result = await client.getRecords({
       host: 'dc01.corp.example.com',
       port: 53,
@@ -76,11 +76,11 @@ describe('Rfc2136TransportClient', () => {
 
   it('maps a network timeout to a retryable failure', async () => {
     agent
-      .get('http://transport:9090')
+      .get('http://ddo-rfc2136:9090')
       .intercept({ path: '/v1/records', method: 'POST' })
       .replyWithError(new Error('connect ETIMEDOUT'));
 
-    const client = new Rfc2136TransportClient('http://transport:9090', 30_000);
+    const client = new Rfc2136WebhookClient('http://ddo-rfc2136:9090', 30_000);
     const result = await client.getRecords({
       host: 'dc01.corp.example.com',
       port: 53,
