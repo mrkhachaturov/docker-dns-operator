@@ -42,7 +42,7 @@ export const validationSchema = Joi.object({
     .trim()
     .empty('')
     .default('error')
-    .allow('log', 'error', 'warn', 'debug', 'verbose', 'fatal'),
+    .valid('log', 'error', 'warn', 'debug', 'verbose', 'fatal'),
 
   // MikroTik — all optional at schema level; partial config guard below
   MIKROTIK_BASEURL: Joi.string().uri().optional(),

@@ -106,7 +106,7 @@ describe('App Configuration', () => {
       process.env.PRESERVE_STOPPED = preserveStopped;
       setEnvironmentVariable('API_TOKEN', apiToken);
       setEnvironmentVariable('API_TOKEN_FILE', apiTokenFile);
-      process.env.LOG_LEVEL = 'info';
+      process.env.LOG_LEVEL = 'error';
 
       // act
       const sut = await getSystemUnderTest();
@@ -182,6 +182,28 @@ describe('App Configuration', () => {
       spyLoadConfigurationApiTokenFile.mockRestore();
       spyLoadConfigurationComposedConstants.mockRestore();
     }
+  });
+
+  it('should reject invalid LOG_LEVEL values at startup', async () => {
+    const spyLoadConfigurationApiTokenFile = jest
+      .spyOn(ConfigurationModule, 'loadConfigurationApiTokenFile')
+      .mockReturnValue({});
+    const spyLoadConfigurationComposedConstants = jest
+      .spyOn(ConfigurationModule, 'loadConfigurationComposedConstants')
+      .mockReturnValue({ ENTRY_IDENTIFIER: '' });
+
+    process.env.PROJECT_LABEL = 'label';
+    process.env.INSTANCE_ID = '1';
+    process.env.EXECUTION_FREQUENCY_SECONDS = '60';
+    setEnvironmentVariable('API_TOKEN', 'validtoken');
+    setEnvironmentVariable('API_TOKEN_FILE', undefined);
+    process.env.LOG_LEVEL = 'info';
+    process.env.PRESERVE_STOPPED = 'false';
+
+    await expect(getSystemUnderTest()).rejects.toThrow(/LOG_LEVEL/);
+
+    spyLoadConfigurationApiTokenFile.mockRestore();
+    spyLoadConfigurationComposedConstants.mockRestore();
   });
 
   each([
