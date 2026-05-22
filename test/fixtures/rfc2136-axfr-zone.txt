@@ -1,14 +1,14 @@
 servers.corp.example.com.	3600	IN	SOA	dc1.corp.example.com. hostmaster.corp.example.com. 12345 900 600 86400 3600
 servers.corp.example.com.	3600	IN	NS	dc1.corp.example.com.
 app.servers.corp.example.com.	300	IN	A	10.1.2.3
-dnsync-a.app.servers.corp.example.com.	300	IN	TXT	"owned-by=docker-compose-external-dns:1"
+ddo-a.app.servers.corp.example.com.	300	IN	TXT	"owned-by=docker-dns-operator:1"
 alias.servers.corp.example.com.	300	IN	CNAME	app.servers.corp.example.com.
-dnsync-cname.alias.servers.corp.example.com.	300	IN	TXT	"owned-by=docker-compose-external-dns:1"
-dnsync-a.orphan.servers.corp.example.com.	300	IN	TXT	"owned-by=docker-compose-external-dns:1"
+ddo-cname.alias.servers.corp.example.com.	300	IN	TXT	"owned-by=docker-dns-operator:1"
+ddo-a.orphan.servers.corp.example.com.	300	IN	TXT	"owned-by=docker-dns-operator:1"
 mail.servers.corp.example.com.	3600	IN	MX	10 smtp.corp.example.com.
 unowned.servers.corp.example.com.	300	IN	A	10.9.9.9
 ipv6.servers.corp.example.com.	300	IN	AAAA	2001:db8::1
-dnsync-aaaa.ipv6.servers.corp.example.com.	300	IN	TXT	"owned-by=docker-compose-external-dns:1"
+ddo-aaaa.ipv6.servers.corp.example.com.	300	IN	TXT	"owned-by=docker-dns-operator:1"
 other-instance.servers.corp.example.com.	300	IN	A	10.5.5.5
-dnsync-a.other-instance.servers.corp.example.com.	300	IN	TXT	"owned-by=docker-compose-external-dns:2"
+ddo-a.other-instance.servers.corp.example.com.	300	IN	TXT	"owned-by=docker-dns-operator:2"
 servers.corp.example.com.	3600	IN	SOA	dc1.corp.example.com. hostmaster.corp.example.com. 12345 900 600 86400 3600

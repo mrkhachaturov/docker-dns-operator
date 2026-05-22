@@ -114,8 +114,3 @@ for verification.
   [external-dns](https://github.com/kubernetes-sigs/external-dns))
 - Non-Docker sources
 - IPv6 DDNS (only IPv4 is supported today)
-
-## Internal context
-
-Anything site-specific (deployment targets, secrets paths, internal hostnames, CI runner
-names, who uses this where) lives in `CLAUDE.local.md` — not here.

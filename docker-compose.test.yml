@@ -11,13 +11,13 @@
 #                                       (see docs/rfc2136-integration-runbook.md
 #                                       in your local checkout, not git-tracked)
 #   2. ./test/krb5.conf               — points at your realm + KDCs
-#   3. transport image built          — `docker build -t docker-external-dns-transport:dev transport-rfc2136/`
+#   3. transport image built          — `docker build -t docker-dns-operator-transport:dev transport-rfc2136/`
 #
 # Flip RFC2136_DRY_RUN to "false" once you've confirmed boot is clean.
 
 services:
   transport:
-    image: docker-external-dns-transport:dev
+    image: docker-dns-operator-transport:dev
     environment:
       TRANSPORT_LISTEN: ":9090"
       RFC2136_KERBEROS_REALM: "CORP.EXAMPLE.COM"
@@ -36,7 +36,7 @@ services:
     depends_on: [transport]
     environment:
       LOG_LEVEL: "debug"
-      PROJECT_LABEL: "docker-compose-external-dns"
+      PROJECT_LABEL: "docker-dns-operator"
       INSTANCE_ID: "1"
       EXECUTION_FREQUENCY_SECONDS: "30"
       RFC2136_TRANSPORT_URL: "http://transport:9090"

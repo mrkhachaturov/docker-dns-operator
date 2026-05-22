@@ -118,7 +118,7 @@ export class Rfc2136Service implements IDnsProvider {
         : [],
     };
     const projectLabel =
-      this.config.get<string>('PROJECT_LABEL') ?? 'docker-compose-external-dns';
+      this.config.get<string>('PROJECT_LABEL') ?? 'docker-dns-operator';
     const instanceId = this.config.get<string>('INSTANCE_ID') ?? '1';
     this.ownershipLabel = `${projectLabel}:${instanceId}`;
     this.zoneQueue.setGate((zone) => !this.unhealthyZonesThisCycle.has(zone));
@@ -264,7 +264,7 @@ export class Rfc2136Service implements IDnsProvider {
       for (const r of records) {
         // eslint-disable-next-line no-continue
         if (r.type !== 'TXT' || r.value !== ownershipValue) continue;
-        const m = r.name.match(/^dnsync-([a-z]+)\.(.+)$/);
+        const m = r.name.match(/^ddo-([a-z]+)\.(.+)$/);
         // eslint-disable-next-line no-continue
         if (!m) continue;
         const [, typeLc, ownedName] = m;
@@ -301,7 +301,7 @@ export class Rfc2136Service implements IDnsProvider {
         if (r.type !== 'TXT') continue;
         // eslint-disable-next-line no-continue
         if (r.value !== ownershipValue) continue;
-        const m = r.name.match(/^dnsync-([a-z]+)\.(.+)$/);
+        const m = r.name.match(/^ddo-([a-z]+)\.(.+)$/);
         // eslint-disable-next-line no-continue
         if (!m) continue;
         const [, typeLc, ownedName] = m;
@@ -359,7 +359,7 @@ export class Rfc2136Service implements IDnsProvider {
     await this.zoneQueue.enqueue(zone, async () => {
       const raw = this.rawAxfrCache.get(zone) ?? [];
       const targetType = this.entryTypeName(entry);
-      const ownershipName = `dnsync-${targetType.toLowerCase()}.${entry.name.toLowerCase()}`;
+      const ownershipName = `ddo-${targetType.toLowerCase()}.${entry.name.toLowerCase()}`;
       const skipOwnershipTxtPrereq =
         this.orphanOwnershipNames.has(ownershipName);
 

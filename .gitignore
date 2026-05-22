@@ -138,3 +138,6 @@ CLAUDE.local.md
 # rfc2136 integration test artifacts (env-specific, secrets)
 test/keytab/
 test/krb5.conf
+
+# Claude Code local state
+.claude/

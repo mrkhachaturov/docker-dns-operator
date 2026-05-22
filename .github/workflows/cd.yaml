@@ -35,13 +35,13 @@ jobs:
               if([version]$gitVersion -ge [version]$latestMajorVersion) {
                 # it's equal to or greater than
                 # add latest tag to output
-                $latestMajorTag = ", timk153/docker-external-dns:$($majorVersion)-latest"
+                $latestMajorTag = ", mrkhachaturov/docker-dns-operator:$($majorVersion)-latest"
               }
               if([version]$gitVersion -ge [version]$latestVersion) {
-                $latestTag = ', timk153/docker-external-dns:latest'
+                $latestTag = ', mrkhachaturov/docker-dns-operator:latest'
               }
             }
-            return "timk153/docker-external-dns:$($gitVersion)$($latestMajorTag)$($latestTag)"
+            return "mrkhachaturov/docker-dns-operator:$($gitVersion)$($latestMajorTag)$($latestTag)"
       - name: Set up QEMU
         uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf
       - name: Set up Docker Buildx

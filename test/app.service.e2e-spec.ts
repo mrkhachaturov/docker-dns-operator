@@ -35,7 +35,7 @@ jest.mock('cloudflare');
 
 const mockCloudflare = Cloudflare as jest.MockedClass<typeof Cloudflare>;
 
-const label = 'docker-compose-external-dns:1';
+const label = 'docker-dns-operator:1';
 
 /**
  * Converts Entity to CloudFlare value.

@@ -11,7 +11,7 @@
     [
       "jest-junit",
       {
-        "suiteName": "docker-compose-external-dns e2e tests",
+        "suiteName": "docker-dns-operator e2e tests",
         "outputDirectory": "reports",
         "outputName": "test-results-e2e-junit.xml"
       }

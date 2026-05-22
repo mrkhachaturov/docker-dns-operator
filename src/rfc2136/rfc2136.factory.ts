@@ -156,7 +156,7 @@ export class Rfc2136Factory {
   }
 
   private static ownershipName(type: Rfc2136RecordType, name: string): string {
-    return `dnsync-${type.toLowerCase()}.${name}`;
+    return `ddo-${type.toLowerCase()}.${name}`;
   }
 
   private ownershipValue(): string {

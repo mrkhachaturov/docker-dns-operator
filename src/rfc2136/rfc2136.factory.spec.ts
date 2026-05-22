@@ -5,7 +5,7 @@ import { Rfc2136Record } from './types';
 
 describe('Rfc2136Factory', () => {
   const factory = new Rfc2136Factory({
-    ownershipLabel: 'docker-compose-external-dns:1',
+    ownershipLabel: 'docker-dns-operator:1',
     defaultTtl: 3600,
     minTtl: 60,
   });
@@ -31,13 +31,13 @@ describe('Rfc2136Factory', () => {
         op: 'add',
         record: {
           type: 'TXT',
-          name: 'dnsync-a.app.example.com',
-          value: '"owned-by=docker-compose-external-dns:1"',
+          name: 'ddo-a.app.example.com',
+          value: '"owned-by=docker-dns-operator:1"',
         },
       });
       expect(cs.prerequisites).toEqual([
         { kind: 'NXRRSET', name: 'app.example.com', type: 'A' },
-        { kind: 'NXRRSET', name: 'dnsync-a.app.example.com', type: 'TXT' },
+        { kind: 'NXRRSET', name: 'ddo-a.app.example.com', type: 'TXT' },
       ]);
     });
 
@@ -98,9 +98,9 @@ describe('Rfc2136Factory', () => {
       expect(cs.prerequisites).toEqual([
         {
           kind: 'YXRRSET',
-          name: 'dnsync-a.app.example.com',
+          name: 'ddo-a.app.example.com',
           type: 'TXT',
-          value: '"owned-by=docker-compose-external-dns:1"',
+          value: '"owned-by=docker-dns-operator:1"',
         },
       ]);
     });
@@ -120,19 +120,19 @@ describe('Rfc2136Factory', () => {
         {
           op: 'delete',
           record: {
-            name: 'dnsync-a.app.example.com',
+            name: 'ddo-a.app.example.com',
             type: 'TXT',
             ttl: 0,
-            value: '"owned-by=docker-compose-external-dns:1"',
+            value: '"owned-by=docker-dns-operator:1"',
           },
         },
       ]);
       expect(cs.prerequisites).toEqual([
         {
           kind: 'YXRRSET',
-          name: 'dnsync-a.app.example.com',
+          name: 'ddo-a.app.example.com',
           type: 'TXT',
-          value: '"owned-by=docker-compose-external-dns:1"',
+          value: '"owned-by=docker-dns-operator:1"',
         },
       ]);
     });

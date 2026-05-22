@@ -30,7 +30,7 @@ import { ProviderRegistry } from './providers/provider-registry.service';
       provide: Rfc2136Factory,
       useFactory: (config: ConfigService) =>
         new Rfc2136Factory({
-          ownershipLabel: `${config.get('PROJECT_LABEL') ?? 'docker-compose-external-dns'}:${config.get('INSTANCE_ID') ?? '1'}`,
+          ownershipLabel: `${config.get('PROJECT_LABEL') ?? 'docker-dns-operator'}:${config.get('INSTANCE_ID') ?? '1'}`,
           defaultTtl: Number(config.get('RFC2136_DEFAULT_TTL') ?? 3600),
           minTtl: Number(config.get('RFC2136_MIN_TTL') ?? 60),
         }),

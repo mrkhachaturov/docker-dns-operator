@@ -393,7 +393,7 @@ describe('App Configuration', () => {
 
     // act
     expect(sut.get('PROJECT_LABEL', { infer: true })).toEqual(
-      'docker-compose-external-dns',
+      'docker-dns-operator',
     );
     expect(sut.get('INSTANCE_ID', { infer: true })).toEqual('1');
     expect(sut.get('EXECUTION_FREQUENCY_SECONDS', { infer: true })).toEqual(60);
@@ -421,7 +421,7 @@ describe('App Configuration', () => {
 
       // assert
       expect(sut.get('PROJECT_LABEL', { infer: true })).toEqual(
-        'docker-compose-external-dns',
+        'docker-dns-operator',
       );
       expect(sut.get('INSTANCE_ID', { infer: true })).toEqual('1');
       expect(sut.get('EXECUTION_FREQUENCY_SECONDS', { infer: true })).toEqual(

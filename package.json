@@ -1,5 +1,5 @@
 {
-  "name": "docker-compose-external-dns",
+  "name": "docker-dns-operator",
   "version": "0.0.1",
   "description": "",
   "author": "",
@@ -101,7 +101,7 @@
       [
         "jest-junit",
         {
-          "suiteName": "docker-compose-external-dns tests",
+          "suiteName": "docker-dns-operator tests",
           "outputDirectory": "reports",
           "outputName": "test-results-junit.xml"
         }

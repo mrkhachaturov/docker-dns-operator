@@ -1,4 +1,4 @@
-# docker-external-dns (multi-provider fork)
+# docker-dns-operator (multi-provider fork)
 
 > **Fork of [timk153/docker-external-dns](https://github.com/timk153/docker-external-dns)**
 > This fork extends the original with **multi-provider support** (CloudFlare + MikroTik), per-entry provider routing, and **Docker Swarm support**.
@@ -15,9 +15,13 @@ Built using the [Nest](https://github.com/nestjs/nest) framework (TypeScript).
 |---------|----------|-----------|
 | CloudFlare provider | ✅ | ✅ |
 | MikroTik RouterOS provider | ❌ | ✅ |
+| **RFC2136 / GSS-TSIG provider (Active Directory DNS)** | ❌ | ✅ |
+| **AAAA records (IPv6)** | ❌ | ✅ (via rfc2136) |
 | Per-entry provider routing (`providers` label) | ❌ | ✅ |
 | Route one entry to multiple providers | ❌ | ✅ |
 | Docker Swarm support | ❌ | ✅ |
+| **Multi-DC failover with circuit breaker** (rfc2136) | ❌ | ✅ |
+| **Per-entry TTL override** (rfc2136) | ❌ | ✅ |
 
 ## What it does
 
@@ -25,13 +29,14 @@ Built using the [Nest](https://github.com/nestjs/nest) framework (TypeScript).
 - Synchronises those records to one or more configured DNS providers
   - **CloudFlare** — public DNS, supports A, CNAME, MX, NS, proxying
   - **MikroTik RouterOS** — local DNS via REST API, supports A, CNAME, MX, NS
+  - **RFC2136 / GSS-TSIG** — secure dynamic updates to **Active Directory DNS** (or any RFC 2136 server speaking GSS-TSIG). Supports A, AAAA, CNAME, MX, NS. Multi-DC failover with per-zone pinning, per-DC circuit breaker, and AXFR-or-prereq-only modes. Implemented as a small Go sidecar that owns the Kerberos/TSIG protocol layer
 - Each DNS entry declares which provider(s) it targets via a `providers` label field
 - Optionally includes stopped containers
 - Runs on a configurable interval (seconds)
 - Supports DDNS (IPv4)
 - Supports multiple instances with different configurations
-- Tags managed records with an ownership comment to avoid touching unrelated entries
-- Supports DNS record types: A, CNAME, MX, NS
+- Tags managed records with an ownership marker (a `ddo-<type>.<name>` TXT record carrying `owned-by=<PROJECT_LABEL>:<INSTANCE_ID>`) — the reconciler never touches a record without that marker, so existing zone entries are safe
+- Supports DNS record types: A, AAAA (rfc2136 only), CNAME, MX, NS
 
 At least one provider must be configured.
 
@@ -70,7 +75,7 @@ Detailed examples are available in the [Examples](#examples) section.
 
 | Variable Name                    | Default Value               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | -------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PROJECT_LABEL                    | docker-compose-external-dns | Detailed example available in the [project Label and Instance ID section](#project_label-and-instance_id) section.<br/><br/>Forms part of the label the project looks for on Docker containers to interpret as DNS entries. Also written as an ownership comment for managed provider records.                                                                                                                                                            |
+| PROJECT_LABEL                    | docker-dns-operator | Detailed example available in the [project Label and Instance ID section](#project_label-and-instance_id) section.<br/><br/>Forms part of the label the project looks for on Docker containers to interpret as DNS entries. Also written as an ownership comment for managed provider records.                                                                                                                                                            |
 | INSTANCE_ID                      | 1                           | Detailed example available in the [project Label and Instance ID section](#project_label-and-instance_id) section.<br/><br/>Forms part of the label the project looks for on Docker containers to interpret as DNS entries. Also written as an ownership comment for managed provider records.                                                                                                                                                            |
 | EXECUTION_FREQUENCY_SECONDS      | 60                          | How frequently the CRON job should execute to detect changes. Default is every 60 seconds. Undefined or empty uses the default. Minimum is every 1 second. There is no maximum. This must be an integer.                                                                                                                                                                                                                                                    |
 | DDNS_EXECUTION_FREQUENCY_MINUTES | 60                          | Determines how frequently the DDNS Service checks for a new public IP address. This setting only applies if you're using DDNS otherwise the service will not be started.                                                                                                                                                                                                                                                                                    |
@@ -111,9 +116,9 @@ It is interpolated as follows: `${PROJECT_ID}:${INSTANCE_ID}`<br/><br/>
 For example:
 |PROJECT_ID|INSTANCE_ID|EXAMPLE|Use Case|
 |-|-|-|-|
-|docker-compose-external-dns|1|docker-compose-external-dns:1|The default|
-|docker-compose-external-dns|production|docker-compose-external-dns:production|Could be used to target a production Cloudflare subscription|
-|docker-compose-external-dns|production|docker-compose-external-dns:non-production|Targets the non-production Cloudflare subscription|
+|docker-dns-operator|1|docker-dns-operator:1|The default|
+|docker-dns-operator|production|docker-dns-operator:production|Could be used to target a production Cloudflare subscription|
+|docker-dns-operator|production|docker-dns-operator:non-production|Targets the non-production Cloudflare subscription|
 |dns.com.mydomain|project|dns.com.mydomain:project|DNS entries for a specific subdomain of yours.
 
 Please note, in a large deployment the project label and instance id will become cruitial to management.<br/>
@@ -143,7 +148,7 @@ Example:
 
 ```yaml
 labels:
-  - 'docker-compose-external-dns:1=[
+  - 'docker-dns-operator:1=[
     { "type": "A", "name": "public.example.com", "address": "1.2.3.4", "providers": ["cf","mikrotik"], "providerOptions": { "cf": { "proxy": true } } },
     { "type": "A", "name": "internal.example.com", "address": "192.168.1.10", "providers": ["mikrotik"] }]'
 ```
@@ -252,7 +257,7 @@ There are four types of image tag associated with this project:
 
 | tag                                         | example                                 | description                                                                                    |
 | ------------------------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| latest                                      | mrkhachaturov/docker-external-dns:latest      | the latest release of the most recent major version                                            |
+| latest                                      | mrkhachaturov/docker-dns-operator:latest      | the latest release of the most recent major version                                            |
 | \<major version number\>-latest             | timk153/docker-external-dns:1-latest    | the latest release of that major version. In the example it's the latest release of version 1. |
 | semantic version number                     | timk153/docker-external-dns:1.4.2       | a specific release. In the example it's release 1.4.2                                          |
 | semantic version with additional identifier | timk153/docker-external-dns:1.4.2-alpha | a alpha, beta or development build. In the example it's an alpha release of version 1.4.2.     |
@@ -274,8 +279,8 @@ This example demonstrates the most basic setup of the Docker Compose External DN
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN=<your api token here>
     volumes:
@@ -286,10 +291,10 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
+      - 'docker-dns-operator:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
 ```
 
-Explanation: This setup includes the docker-compose-external-dns service configured with the API_TOKEN environment variable. It will use the token to authenticate with Cloudflare. The other-service has a label that specifies a DNS A record for my-domain.com pointing to 8.8.8.8 with no proxy.
+Explanation: This setup includes the docker-dns-operator service configured with the API_TOKEN environment variable. It will use the token to authenticate with Cloudflare. The other-service has a label that specifies a DNS A record for my-domain.com pointing to 8.8.8.8 with no proxy.
 
 #### API_TOKEN_FILE
 
@@ -297,8 +302,8 @@ This configuration demonstrates the preferred method of passing the API token se
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN_FILE=/run/secrets/CLOUDFLARE_API_TOKEN
     secrets:
@@ -311,7 +316,7 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
+      - 'docker-dns-operator:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
 
 secrets:
   CLOUDFLARE_API_TOKEN:
@@ -326,8 +331,8 @@ This example demonstrates a configuration which preserves the DNS records for co
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN=<your api token here>
       - PRESERVE_STOPPED=true
@@ -339,7 +344,7 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
+      - 'docker-dns-operator:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
 ```
 
 Explanation: This setup sets PRESERVE_STOPPED to true, meaning if other-service became stopped, the DNS entry would be preserved
@@ -352,8 +357,8 @@ This example shows how to customize the label, instance ID, execution frequency,
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - PROJECT_LABEL=dns.com.example
       - INSTANCE_ID=project-subdomain
@@ -381,15 +386,15 @@ The other-service has a CNAME record pointing project.example.com to example.com
 
 ### Two domains, one service
 
-This example illustrates managing DNS entries for multiple domains using a single docker-compose-external-dns service.
+This example illustrates managing DNS entries for multiple domains using a single docker-dns-operator service.
 Please note, your API_TOKEN(\_FILE) will require permissions for both domains.
 
 <span style="color: red; font-weight: bold;">IMPORTANT</span> example uses insecure option "API_TOKEN" for simplicity.
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN=<your api token here>
     volumes:
@@ -400,16 +405,16 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[
+      - 'docker-dns-operator:1=[
         { "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false },
         { "type": "A", "name": "my-other-domain.org", "address": "8.8.8.8", "proxy": true }]'
 ```
 
-Explanation: This setup shows how to handle DNS records for two different domains (my-domain.com and my-other-domain.org) with one instance of docker-compose-external-dns. Each domain has its own A record configuration. The my-other-domain.org entry uses Cloudflare's proxy.
+Explanation: This setup shows how to handle DNS records for two different domains (my-domain.com and my-other-domain.org) with one instance of docker-dns-operator. Each domain has its own A record configuration. The my-other-domain.org entry uses Cloudflare's proxy.
 
 ### Two domains, two services
 
-These configurations demonstrates how to manage DNS records for different domains using separate docker-compose-external-dns services.
+These configurations demonstrates how to manage DNS records for different domains using separate docker-dns-operator services.
 
 #### INSTANCE_ID
 
@@ -417,16 +422,16 @@ These configurations demonstrates how to manage DNS records for different domain
 
 ```yaml
 services:
-  docker-compose-external-dns-1:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator-1:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN=<api token for my-domain.com here>
     volumes:
       # Used to read labels from containers - readonly
       - '/var/run/docker.sock:/var/run/docker.sock:ro'
 
-docker-compose-external-dns-2:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+docker-dns-operator-2:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - INSTANCE_ID=2
       - API_TOKEN=<api token for my-other-domain.org here>
@@ -438,11 +443,11 @@ docker-compose-external-dns-2:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
-      - 'docker-compose-external-dns:2=[{ "type": "A", "name": "my-other-domain.org", "address": "8.8.8.8", "proxy": true }]'
+      - 'docker-dns-operator:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
+      - 'docker-dns-operator:2=[{ "type": "A", "name": "my-other-domain.org", "address": "8.8.8.8", "proxy": true }]'
 ```
 
-Explanation: This setup uses two separate docker-compose-external-dns services to manage DNS entries for my-domain.com and my-other-domain.org. Each service is configured with its own API token and instance ID. This allows for independent management of DNS entries for each domain.
+Explanation: This setup uses two separate docker-dns-operator services to manage DNS entries for my-domain.com and my-other-domain.org. Each service is configured with its own API token and instance ID. This allows for independent management of DNS entries for each domain.
 
 #### PROJECT_LABEL
 
@@ -450,8 +455,8 @@ Explanation: This setup uses two separate docker-compose-external-dns services t
 
 ```yaml
 services:
-  docker-compose-external-dns-1:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator-1:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - PROJECT_LABEL=dns.com.my-domain
       - API_TOKEN=<api token for my-domain.com here>
@@ -459,8 +464,8 @@ services:
       # Used to read labels from containers - readonly
       - '/var/run/docker.sock:/var/run/docker.sock:ro'
 
-docker-compose-external-dns-2:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+docker-dns-operator-2:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - PROJECT_LABEL=dns.org.my-other-domain
       - API_TOKEN=<api token for my-other-domain.org here>
@@ -476,7 +481,7 @@ docker-compose-external-dns-2:
       - 'dns.org.my-other-domain:1=[{ "type": "A", "name": "my-other-domain.org", "address": "8.8.8.8", "proxy": true }]'
 ```
 
-Explanation: This setup uses two separate docker-compose-external-dns services to manage DNS entries for my-domain.com and my-other-domain.org. Each service is configured with its own API token and project label. This allows for independent management of DNS entries for each domain.
+Explanation: This setup uses two separate docker-dns-operator services to manage DNS entries for my-domain.com and my-other-domain.org. Each service is configured with its own API token and project label. This allows for independent management of DNS entries for each domain.
 
 ### DNS Entry types
 
@@ -489,8 +494,8 @@ Please note, these labels may live on one or more services spead across one or m
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN=<your api token here>
     volumes:
@@ -501,7 +506,7 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
+      - 'docker-dns-operator:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
 ```
 
 Explanation: This example configures an A record for my-domain.com pointing to 8.8.8.8 without using Cloudflare's proxy.
@@ -512,8 +517,8 @@ Explanation: This example configures an A record for my-domain.com pointing to 8
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN=<your api token here>
     volumes:
@@ -524,7 +529,7 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[{ "type": "A", "name": "my-domain.com", "address": "DDNS", "proxy": false }]'
+      - 'docker-dns-operator:1=[{ "type": "A", "name": "my-domain.com", "address": "DDNS", "proxy": false }]'
 ```
 
 Explanation: This example configures an A record for my-domain.com. The project will start the DDNS Service when this record is processed. The service will fetch your current public ipv4 address and use it for this record. The DDNS Service will check at regular intervals for a new ipv4 address. If one is detected then this record will be updated to the new value when the next DNS synchronisation interval is reached.
@@ -537,8 +542,8 @@ Settings to control interval are explained in the [configuration section](#confi
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN=<your api token here>
     volumes:
@@ -549,7 +554,7 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[
+      - 'docker-dns-operator:1=[
         { "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false },
         { "type": "CNAME", "name": "sub.my-domain.com", "target": "my-domain.com", "proxy": false }]'
 ```
@@ -562,8 +567,8 @@ Explanation: This setup includes a CNAME record that aliases sub.my-domain.com t
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN=<your api token here>
     volumes:
@@ -574,7 +579,7 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[
+      - 'docker-dns-operator:1=[
         { "type": "A", "name": "lan.my-domain.com", "address": "192.168.0.1", "proxy": false },
         { "type": "CNAME", "name": "ns1.lan.my-domain.com", "target": "lan.my-domain.com", "proxy": false },
         { "type": "NS", "name": "lan.my-domain.com", "server": "ns1.lan.my-domain.com" }]'
@@ -588,8 +593,8 @@ Explanation: This configuration includes an NS record specifying ns1.lan.my-doma
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN=<your api token here>
     volumes:
@@ -600,7 +605,7 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[
+      - 'docker-dns-operator:1=[
         { "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false },
         { "type": "CNAME", "name": "mx1.my-domain.com", "target": "my-domain.com", "proxy": false },
         { "type": "MX", "name": "my-domain.com", "server": "mx1.my-domain.com", "priority": 0 }]'
@@ -612,8 +617,8 @@ Explanation: This example sets up an MX record for my-domain.com that points to 
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN=<your api token here>
     volumes:
@@ -624,7 +629,7 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[
+      - 'docker-dns-operator:1=[
         { "type": "A", "name": "my-domain.com", "address": "DDNS", "proxy": false },
         { "type": "CNAME", "name": "mx1.my-domain.com", "target": "my-domain.com", "proxy": false },
         { "type": "MX", "name": "my-domain.com", "server": "mx1.my-domain.com", "priority": 0 },
@@ -642,8 +647,8 @@ This example shows the simplest MikroTik-only setup. The MikroTik REST API runs 
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - MIKROTIK_BASEURL=http://192.168.1.1
       - MIKROTIK_USERNAME=<your username>
@@ -655,11 +660,11 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[
+      - 'docker-dns-operator:1=[
           { "type": "A", "name": "myservice.lan", "address": "192.168.1.50", "providers": ["mikrotik"] }]'
 ```
 
-Explanation: Connects to the MikroTik REST API at `http://192.168.1.1` (port 80). The `providers` field routes the entry to MikroTik. Managed records are tagged with an ownership comment (`docker-compose-external-dns:1`) so the service only modifies records it created.
+Explanation: Connects to the MikroTik REST API at `http://192.168.1.1` (port 80). The `providers` field routes the entry to MikroTik. Managed records are tagged with an ownership comment (`docker-dns-operator:1`) so the service only modifies records it created.
 
 #### Self-signed TLS certificate
 
@@ -669,8 +674,8 @@ If your MikroTik uses HTTPS with a self-signed certificate (common in home labs)
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - MIKROTIK_BASEURL=https://192.168.1.1
       - MIKROTIK_USERNAME=<your username>
@@ -683,7 +688,7 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[
+      - 'docker-dns-operator:1=[
           { "type": "A", "name": "myservice.lan", "address": "192.168.1.50", "providers": ["mikrotik"] }]'
 ```
 
@@ -693,8 +698,8 @@ Use `MIKROTIK_DEFAULT_TTL` to control the TTL (in seconds) applied to newly crea
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - MIKROTIK_BASEURL=http://192.168.1.1
       - MIKROTIK_USERNAME=<your username>
@@ -707,7 +712,7 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[
+      - 'docker-dns-operator:1=[
           { "type": "A", "name": "myservice.lan", "address": "192.168.1.50", "providers": ["mikrotik"] }]'
 ```
 
@@ -723,8 +728,8 @@ A common homelab pattern: public-facing records go to CloudFlare, internal LAN r
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN=<your cloudflare api token>
       - MIKROTIK_BASEURL=http://192.168.1.1
@@ -737,7 +742,7 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[
+      - 'docker-dns-operator:1=[
           { "type": "A", "name": "myservice.my-domain.com", "address": "1.2.3.4",       "providers": ["cf"],        "providerOptions": { "cf": { "proxy": true } } },
           { "type": "A", "name": "myservice.lan",           "address": "192.168.1.50",  "providers": ["mikrotik"] }]'
 ```
@@ -750,8 +755,8 @@ Use `"providers": ["cf", "mikrotik"]` (or the shorthand `"providers": "all"`) to
 
 ```yaml
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN=<your cloudflare api token>
       - MIKROTIK_BASEURL=http://192.168.1.1
@@ -764,7 +769,7 @@ services:
     image: 'busybox:latest'
     command: 'sleep 3600'
     labels:
-      - 'docker-compose-external-dns:1=[
+      - 'docker-dns-operator:1=[
           { "type": "A", "name": "myservice.my-domain.com", "address": "1.2.3.4", "providers": "all" }]'
 ```
 
@@ -779,8 +784,8 @@ DNS labels must be set at the **service** level using `deploy.labels`, not the t
 ```yaml
 version: "3.8"
 services:
-  docker-compose-external-dns:
-    image: 'mrkhachaturov/docker-external-dns:latest'
+  docker-dns-operator:
+    image: 'mrkhachaturov/docker-dns-operator:latest'
     environment:
       - API_TOKEN=<your cloudflare api token>
       - DOCKER_SWARM_MODE=true
@@ -791,14 +796,14 @@ services:
     image: nginx
     deploy:
       labels:
-        - 'docker-compose-external-dns:1=[{ "type": "A", "name": "myapp.example.com", "address": "1.2.3.4" }]'
+        - 'docker-dns-operator:1=[{ "type": "A", "name": "myapp.example.com", "address": "1.2.3.4" }]'
 ```
 
 > **Note:** `PRESERVE_STOPPED` has no effect in Swarm mode. All services are always returned.
 
 ### Routing an entry to AD DNS via RFC2136
 
-The service reads ONE Docker label keyed by `ENTRY_IDENTIFIER` (default `docker-compose-external-dns:1`); its value is a JSON-stringified array of entry objects:
+The service reads ONE Docker label keyed by `ENTRY_IDENTIFIER` (default `docker-dns-operator:1`); its value is a JSON-stringified array of entry objects:
 
 ```yaml
 services:
@@ -806,7 +811,7 @@ services:
     image: myapp:latest
     labels:
       # Replace the key prefix with your actual ENTRY_IDENTIFIER.
-      docker-compose-external-dns:1: |
+      docker-dns-operator:1: |
         [
           {
             "type": "A",
@@ -826,7 +831,7 @@ Use `"providers": ["rfc2136", "cf"]` to write the same entry to both AD and Clou
 
 ```yaml
 labels:
-  - 'docker-compose-external-dns:1=[
+  - 'docker-dns-operator:1=[
       { "type": "AAAA", "name": "app.internal.corp", "address": "2001:db8::42", "providers": ["rfc2136"] }]'
 ```
 

@@ -150,7 +150,7 @@ export class DockerService {
   }
 
   /**
-   * Finds containers with the labels associated with this instance of the docker-compose-external-dns project.
+   * Finds containers with the labels associated with this instance of the docker-dns-operator project.
    * Returns the containers information verbatim.
    * @returns Promise resolving to the docker containers
    * @throws {Error} If serivce hasn't been initialized

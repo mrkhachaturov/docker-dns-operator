@@ -26,7 +26,7 @@ describe('DockerService (Integration)', () => {
   let app: INestApplication;
   let sut: DockerService;
 
-  const label = 'docker-compose-external-dns:1';
+  const label = 'docker-dns-operator:1';
 
   type TestContainerInstances = {
     network: StartedNetwork;
@@ -307,7 +307,7 @@ describe('DockerService (Integration)', () => {
 
   describe('getSources — swarm mode (real Docker Swarm)', () => {
     const dockerode = new Dockerode();
-    const swarmLabel = 'docker-compose-external-dns:1';
+    const swarmLabel = 'docker-dns-operator:1';
     let createdServiceId: string | undefined;
     let swarmInitiatedByTest = false;
     const serviceName = `dns-swarm-e2e-test-${Date.now()}`;

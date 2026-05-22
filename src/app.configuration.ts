@@ -9,7 +9,7 @@ export const validationSchema = Joi.object({
     .pattern(/^[A-Za-z0-9-_.]+$/)
     .trim()
     .empty('')
-    .default('docker-compose-external-dns'),
+    .default('docker-dns-operator'),
   INSTANCE_ID: Joi.string()
     .pattern(/^[A-Za-z0-9-_]+$/)
     .trim()

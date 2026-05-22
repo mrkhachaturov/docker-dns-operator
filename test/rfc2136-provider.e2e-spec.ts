@@ -90,7 +90,7 @@ describe('Rfc2136Service e2e', () => {
     process.env.RFC2136_KEYTAB_FILE = '/run/secrets/keytab';
     process.env.RFC2136_DEFAULT_TTL = '300';
     process.env.RFC2136_MIN_TTL = '60';
-    process.env.PROJECT_LABEL = 'docker-compose-external-dns';
+    process.env.PROJECT_LABEL = 'docker-dns-operator';
     process.env.INSTANCE_ID = '1';
 
     module = await Test.createTestingModule({
@@ -101,7 +101,7 @@ describe('Rfc2136Service e2e', () => {
           provide: Rfc2136Factory,
           useFactory: () =>
             new Rfc2136Factory({
-              ownershipLabel: 'docker-compose-external-dns:1',
+              ownershipLabel: 'docker-dns-operator:1',
               defaultTtl: 300,
               minTtl: 60,
             }),
@@ -347,10 +347,10 @@ describe('Rfc2136Service e2e', () => {
           value: '10.1.2.3',
         },
         {
-          name: 'dnsync-a.app.zone-a.example.com',
+          name: 'ddo-a.app.zone-a.example.com',
           type: 'TXT',
           ttl: 300,
-          value: '"owned-by=docker-compose-external-dns:1"',
+          value: '"owned-by=docker-dns-operator:1"',
         },
         {
           name: 'unowned.zone-a.example.com',

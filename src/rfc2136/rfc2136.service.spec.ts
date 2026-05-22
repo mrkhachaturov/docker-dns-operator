@@ -304,7 +304,7 @@ describe('Rfc2136Service', () => {
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
               RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
-              PROJECT_LABEL: 'docker-compose-external-dns',
+              PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
           )[key],
@@ -321,10 +321,10 @@ describe('Rfc2136Service', () => {
           value: '10.0.0.1',
         },
         {
-          name: 'dnsync-a.app.zone-a.example.com',
+          name: 'ddo-a.app.zone-a.example.com',
           type: 'TXT',
           ttl: 300,
-          value: '"owned-by=docker-compose-external-dns:1"',
+          value: '"owned-by=docker-dns-operator:1"',
         },
         {
           name: 'unowned.zone-a.example.com',
@@ -339,10 +339,10 @@ describe('Rfc2136Service', () => {
           value: '10.0.0.50',
         },
         {
-          name: 'dnsync-a.other-inst.zone-a.example.com',
+          name: 'ddo-a.other-inst.zone-a.example.com',
           type: 'TXT',
           ttl: 300,
-          value: '"owned-by=docker-compose-external-dns:2"',
+          value: '"owned-by=docker-dns-operator:2"',
         },
       ]);
 
@@ -361,10 +361,10 @@ describe('Rfc2136Service', () => {
           value: '10.0.0.1',
         },
         {
-          name: 'dnsync-a.app.zone-a.example.com',
+          name: 'ddo-a.app.zone-a.example.com',
           type: 'TXT',
           ttl: 300,
-          value: '"owned-by=docker-compose-external-dns:1"',
+          value: '"owned-by=docker-dns-operator:1"',
         },
       ]);
       (service as any).unhealthyZonesThisCycle.add('zone-a.example.com');
@@ -382,10 +382,10 @@ describe('Rfc2136Service', () => {
           value: '10.0.0.1',
         },
         {
-          name: 'dnsync-a.app.zone-a.example.com',
+          name: 'ddo-a.app.zone-a.example.com',
           type: 'TXT',
           ttl: 300,
-          value: '"owned-by=docker-compose-external-dns:1"',
+          value: '"owned-by=docker-dns-operator:1"',
         },
       ]);
       const records = await service.getRecords();
@@ -409,7 +409,7 @@ describe('Rfc2136Service', () => {
               RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               RFC2136_DEFAULT_TTL: 300,
               RFC2136_MIN_TTL: 60,
-              PROJECT_LABEL: 'docker-compose-external-dns',
+              PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
           )[key],
@@ -536,7 +536,7 @@ describe('Rfc2136Service', () => {
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
               RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
-              PROJECT_LABEL: 'docker-compose-external-dns',
+              PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
           )[key],
@@ -563,9 +563,9 @@ describe('Rfc2136Service', () => {
         prerequisites: [
           {
             kind: 'YXRRSET',
-            name: 'dnsync-a.app.zone-a.example.com',
+            name: 'ddo-a.app.zone-a.example.com',
             type: 'TXT',
-            value: '"owned-by=docker-compose-external-dns:1"',
+            value: '"owned-by=docker-dns-operator:1"',
           },
         ],
         changes: [
@@ -636,7 +636,7 @@ describe('Rfc2136Service', () => {
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
               RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
-              PROJECT_LABEL: 'docker-compose-external-dns',
+              PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
           )[key],
@@ -663,9 +663,9 @@ describe('Rfc2136Service', () => {
         prerequisites: [
           {
             kind: 'YXRRSET',
-            name: 'dnsync-a.app.zone-a.example.com',
+            name: 'ddo-a.app.zone-a.example.com',
             type: 'TXT',
-            value: '"owned-by=docker-compose-external-dns:1"',
+            value: '"owned-by=docker-dns-operator:1"',
           },
         ],
         changes: [
@@ -681,10 +681,10 @@ describe('Rfc2136Service', () => {
           {
             op: 'delete',
             record: {
-              name: 'dnsync-a.app.zone-a.example.com',
+              name: 'ddo-a.app.zone-a.example.com',
               type: 'TXT',
               ttl: 0,
-              value: '"owned-by=docker-compose-external-dns:1"',
+              value: '"owned-by=docker-dns-operator:1"',
             },
           },
         ],
@@ -712,7 +712,7 @@ describe('Rfc2136Service', () => {
               RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               RFC2136_DEFAULT_TTL: 300,
               RFC2136_MIN_TTL: 60,
-              PROJECT_LABEL: 'docker-compose-external-dns',
+              PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
           )[key],
@@ -835,7 +835,7 @@ describe('Rfc2136Service', () => {
               RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               RFC2136_DEFAULT_TTL: 300,
               RFC2136_MIN_TTL: 60,
-              PROJECT_LABEL: 'docker-compose-external-dns',
+              PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
           )[key],
@@ -848,17 +848,17 @@ describe('Rfc2136Service', () => {
         ok: true,
         records: [
           {
-            name: 'dnsync-a.app.zone-a.example.com',
+            name: 'ddo-a.app.zone-a.example.com',
             type: 'TXT',
             ttl: 300,
-            value: '"owned-by=docker-compose-external-dns:1"',
+            value: '"owned-by=docker-dns-operator:1"',
           },
         ],
       });
       await service.prepareForJob();
       expect(
         (service as any).orphanOwnershipNames.has(
-          'dnsync-a.app.zone-a.example.com',
+          'ddo-a.app.zone-a.example.com',
         ),
       ).toBe(true);
 
@@ -910,7 +910,7 @@ describe('Rfc2136Service', () => {
               RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
               RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
-              PROJECT_LABEL: 'docker-compose-external-dns',
+              PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
           )[key],
@@ -977,7 +977,7 @@ describe('Rfc2136Service', () => {
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
               RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               RFC2136_DOMAIN_FILTER: 'containers.zone-a.example.com',
-              PROJECT_LABEL: 'docker-compose-external-dns',
+              PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
           )[key],
@@ -1056,10 +1056,10 @@ describe('Rfc2136Service', () => {
           value: '10.0.0.1',
         },
         {
-          name: 'dnsync-a.web.containers.zone-a.example.com',
+          name: 'ddo-a.web.containers.zone-a.example.com',
           type: 'TXT',
           ttl: 300,
-          value: '"owned-by=docker-compose-external-dns:1"',
+          value: '"owned-by=docker-dns-operator:1"',
         },
         {
           name: 'admin.zone-a.example.com',
@@ -1068,10 +1068,10 @@ describe('Rfc2136Service', () => {
           value: '10.0.0.2',
         },
         {
-          name: 'dnsync-a.admin.zone-a.example.com',
+          name: 'ddo-a.admin.zone-a.example.com',
           type: 'TXT',
           ttl: 300,
-          value: '"owned-by=docker-compose-external-dns:1"',
+          value: '"owned-by=docker-dns-operator:1"',
         },
       ]);
       const records = await service.getRecords();
@@ -1106,7 +1106,7 @@ describe('Rfc2136Service', () => {
               RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
               RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
               RFC2136_TAXFR: false,
-              PROJECT_LABEL: 'docker-compose-external-dns',
+              PROJECT_LABEL: 'docker-dns-operator',
               INSTANCE_ID: '1',
             }) as Record<string, unknown>
           )[key],
