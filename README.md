@@ -1,838 +1,487 @@
-# docker-dns-operator (multi-provider fork)
+# docker-dns-operator
 
-> **Fork of [timk153/docker-external-dns](https://github.com/timk153/docker-external-dns)**
-> This fork extends the original with **multi-provider support** (CloudFlare + MikroTik), per-entry provider routing, and **Docker Swarm support**.
+[![CI](https://github.com/mrkhachaturov/docker-dns-operator/actions/workflows/ci.yaml/badge.svg)](https://github.com/mrkhachaturov/docker-dns-operator/actions/workflows/ci.yaml)
+[![Docker Hub](https://img.shields.io/docker/v/mrkhachaturov/docker-dns-operator?label=docker&sort=semver)](https://hub.docker.com/r/mrkhachaturov/docker-dns-operator)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-This project was originally inspired by:
-- https://github.com/kubernetes-sigs/external-dns
-- https://github.com/dntsk/extdns
+Declarative DNS for Docker. Annotate a container or Swarm service with a JSON label and the operator reconciles those records into CloudFlare, MikroTik RouterOS, and/or Active Directory DNS on every tick. Records you didn't create are never touched.
 
-Built using the [Nest](https://github.com/nestjs/nest) framework (TypeScript).
+---
 
-## What this fork adds
+## Contents
 
-| Feature | Upstream | This fork |
-|---------|----------|-----------|
-| CloudFlare provider | ✅ | ✅ |
-| MikroTik RouterOS provider | ❌ | ✅ |
-| **RFC2136 / GSS-TSIG provider (Active Directory DNS)** | ❌ | ✅ |
-| **AAAA records (IPv6)** | ❌ | ✅ (via rfc2136) |
-| Per-entry provider routing (`providers` label) | ❌ | ✅ |
-| Route one entry to multiple providers | ❌ | ✅ |
-| Docker Swarm support | ❌ | ✅ |
-| **Multi-DC failover with circuit breaker** (rfc2136) | ❌ | ✅ |
-| **Per-entry TTL override** (rfc2136) | ❌ | ✅ |
+- [What it does](#what-it-does)
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [Providers](#providers)
+  - [CloudFlare](#cloudflare)
+  - [MikroTik RouterOS](#mikrotik-routeros)
+  - [RFC 2136 / Active Directory](#rfc-2136--active-directory)
+- [Configuration](#configuration)
+  - [Environment variables](#environment-variables)
+  - [Label schema](#label-schema)
+  - [Record types](#record-types)
+- [Examples](#examples)
+- [Operations](#operations)
+- [Security](#security)
+- [Development](#development)
+- [Credits](#credits)
+- [License](#license)
+
+---
 
 ## What it does
 
-- Reads DNS labels from Docker containers or Swarm services sharing the same Docker runtime
-- Synchronises those records to one or more configured DNS providers
-  - **CloudFlare** — public DNS, supports A, CNAME, MX, NS, proxying
-  - **MikroTik RouterOS** — local DNS via REST API, supports A, CNAME, MX, NS
-  - **RFC2136 / GSS-TSIG** — secure dynamic updates to **Active Directory DNS** (or any RFC 2136 server speaking GSS-TSIG). Supports A, AAAA, CNAME, MX, NS. Multi-DC failover with per-zone pinning, per-DC circuit breaker, and AXFR-or-prereq-only modes. Implemented as a small Go sidecar that owns the Kerberos/TSIG protocol layer
-- Each DNS entry declares which provider(s) it targets via a `providers` label field
-- Optionally includes stopped containers
-- Runs on a configurable interval (seconds)
-- Supports DDNS (IPv4)
-- Supports multiple instances with different configurations
-- Tags managed records with an ownership marker (a `ddo-<type>.<name>` TXT record carrying `owned-by=<PROJECT_LABEL>:<INSTANCE_ID>`) — the reconciler never touches a record without that marker, so existing zone entries are safe
-- Supports DNS record types: A, AAAA (rfc2136 only), CNAME, MX, NS
+- Watches the Docker socket and reads DNS entries from container labels (or `deploy.labels` in Swarm mode).
+- Reconciles those entries into three DNS providers: CloudFlare, MikroTik RouterOS, and Active Directory DNS via RFC 2136 + GSS-TSIG.
+- Routes each entry to one, several, or all providers via a `providers` field on the entry.
+- Owns only records it created, marked with a `ddo-<type>.<name>` TXT marker. Pre-existing zone entries are left alone.
+- Supports A, AAAA (rfc2136), CNAME, MX, and NS records.
+- Multi-DC failover with a per-DC circuit breaker, per-zone DC pinning, and AXFR-or-prereq-only modes for the rfc2136 provider.
+- Per-entry TTL overrides on rfc2136. DDNS (public IPv4) on CloudFlare.
+- Runs on a configurable interval. Multiple instances can target the same zones with separate `INSTANCE_ID`s without conflicting.
 
-At least one provider must be configured.
+---
 
-# User guide
+## Quick start
 
-## TL;DR
+Minimum CloudFlare setup. Drop this into a `docker-compose.yml`, supply an API token, and run `docker compose up -d`:
 
-Attach DNS labels to your Docker containers. This service reads those labels and keeps the configured DNS providers in sync — creating, updating, and deleting records automatically. It supports CloudFlare and MikroTik, with per-entry routing so each record goes only to the provider(s) you specify. See the [Examples](#examples) section for common configurations.
+```yaml
+services:
+  dns-operator:
+    image: mrkhachaturov/docker-dns-operator:latest
+    environment:
+      API_TOKEN_FILE: /run/secrets/cloudflare_token
+    secrets:
+      - cloudflare_token
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
 
-## Troubleshooting
+  whoami:
+    image: traefik/whoami
+    labels:
+      docker-dns-operator:1: |
+        [{ "type": "A", "name": "whoami.example.com", "address": "1.2.3.4" }]
 
-### Hangs at startup
+secrets:
+  cloudflare_token:
+    file: ./cloudflare_token.txt
+```
 
-Check your supplied LOG_LEVEL.<br/>
-Ensure it is one of: 'log', 'error', 'warn', 'debug', 'verbose', 'fatal'
+The operator polls Docker every `EXECUTION_FREQUENCY_SECONDS` (default 60), reads the label off `whoami`, and creates `whoami.example.com` in CloudFlare. Remove the container and the record is removed on the next tick.
 
-If set to an invalid value the project will hand at start-up. I've tried to address this behavior unsuccessfully. For now awareness is the simplest solution.
+For MikroTik or Active Directory, see the [Providers](#providers) section.
 
-## How to Use
+---
 
-Using the Docker Compose External DNS container is very straightforward. You need to declare an instance of it within your Docker Compose definition (docker-compose.y(a)ml) with the appropriate volume mount and environment variables set. Then, add some labels to your containers.
+## How it works
 
-This file comprises the following sections:
+```
+┌──────────────────┐  reads labels   ┌────────────────────┐  applies records   ┌──────────────┐
+│  Docker socket   │ ───────────────▶│  docker-dns-operator│ ─────────────────▶│  CloudFlare  │
+│  (containers     │                 │                    │                    ├──────────────┤
+│   or services)   │                 │  - reconciler loop │ ─────────────────▶│   MikroTik   │
+└──────────────────┘                 │  - ownership check │                    ├──────────────┤
+                                     │  - per-entry route │ ─────────────────▶│  AD via      │
+                                     └─────────┬──────────┘     gss-tsig       │  rfc2136     │
+                                               │                              └──────────────┘
+                                               ▼
+                                     ┌────────────────────┐
+                                     │  rfc2136-transport │  (sidecar, only when rfc2136 is enabled)
+                                     │  Go binary with    │
+                                     │  Kerberos/TSIG     │
+                                     └────────────────────┘
+```
 
-- [Configuration](#configuration): All the configuration options available.
-  - [Environment Variables](#environment-variables): All the variables that can be set and what they do.
-  - [Labels](#labels): All the possible DNS entry types supported and how to use them.
-- [Examples](#examples): Common configurations.
+The reconciler runs on a fixed interval. Each cycle:
+
+1. List Docker containers (or Swarm services, if `DOCKER_SWARM_MODE=true`).
+2. Parse the `${PROJECT_LABEL}:${INSTANCE_ID}` label as a JSON array of entries.
+3. Group entries by provider based on each entry's `providers` field.
+4. For each provider, diff desired state against currently-owned records and apply create/update/delete.
+
+**Ownership marker.** Every managed record carries a sibling TXT record at `ddo-<type>.<name>` whose value is `owned-by=${PROJECT_LABEL}:${INSTANCE_ID}`. The reconciler only touches records that carry this marker, so pre-existing zone entries are safe. Two operator instances with different `INSTANCE_ID`s can coexist on the same zone without stepping on each other.
+
+At least one provider must be configured at startup.
+
+---
+
+## Providers
+
+### CloudFlare
+
+Enabled when `API_TOKEN` **or** `API_TOKEN_FILE` is set. The token needs `Zone.Zone:Read` and `Zone.DNS:Edit` for every zone you want to manage.
+
+Supports: A, CNAME, MX, NS, with optional proxying.
+
+Use `API_TOKEN_FILE` with a Docker secret in production. `API_TOKEN` plain-env is supported but writes the token into the container's environment, which is visible via `docker inspect`.
+
+### MikroTik RouterOS
+
+Enabled when `MIKROTIK_BASEURL`, `MIKROTIK_USERNAME`, and `MIKROTIK_PASSWORD` are all set. Talks to the RouterOS REST API (same port as the web UI: `www` on 80, `www-ssl` on 443).
+
+Supports: A, CNAME, MX, NS.
+
+If your router uses a self-signed certificate, set `MIKROTIK_SKIP_TLS_VERIFY=true`. Only do this on trusted networks.
+
+### RFC 2136 / Active Directory
+
+Enabled when the full `RFC2136_*` block is set. Performs secure dynamic DNS updates (RFC 2136 + GSS-TSIG) against Active Directory domain controllers, which is the same protocol [external-dns](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/rfc2136.md) uses for AD integration.
+
+Supports: A, AAAA, CNAME, MX, NS.
+
+The Kerberos/TSIG protocol layer runs in a separate sidecar container (`transport-rfc2136`, written in Go). The main operator talks to it over HTTP. The sidecar:
+
+- runs `kinit -kt` against a keytab on startup and refreshes the TGT every `RFC2136_KINIT_REFRESH_INTERVAL`,
+- signs UPDATE and AXFR messages with GSS-TSIG,
+- exposes `/healthz` for liveness, which flips to HTTP 503 with `{"kerberos":"expired"}` if `kinit` fails.
+
+The operator implements failover across multiple DCs (`RFC2136_HOSTS`) with a per-DC circuit breaker, per-zone DC pinning, and a TAXFR-off mode for environments where AXFR is denied.
+
+**Hostnames, not IPs.** `RFC2136_HOSTS` must contain real DNS hostnames of your DCs. IPs and bare hostnames are rejected at startup. AD's Kerberos service principal is bound to the host you contact, and using an IP or short name produces `KDC_ERR_S_PRINCIPAL_UNKNOWN` or `KDC_ERR_WRONG_REALM` on every cycle.
+
+See [docs/rfc2136-integration-runbook.md](docs/rfc2136-integration-runbook.md) for keytab generation, AD permission setup, and the full deployment walkthrough.
+
+---
 
 ## Configuration
 
-### Environment Variables
+### Environment variables
 
-The container is configured via environment variables. The following table describes the variable name, its default value (if any), and what it does.
-Detailed examples are available in the [Examples](#examples) section.
+Common to all providers:
 
-| Variable Name                    | Default Value               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| -------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PROJECT_LABEL                    | docker-dns-operator | Detailed example available in the [project Label and Instance ID section](#project_label-and-instance_id) section.<br/><br/>Forms part of the label the project looks for on Docker containers to interpret as DNS entries. Also written as an ownership comment for managed provider records.                                                                                                                                                            |
-| INSTANCE_ID                      | 1                           | Detailed example available in the [project Label and Instance ID section](#project_label-and-instance_id) section.<br/><br/>Forms part of the label the project looks for on Docker containers to interpret as DNS entries. Also written as an ownership comment for managed provider records.                                                                                                                                                            |
-| EXECUTION_FREQUENCY_SECONDS      | 60                          | How frequently the CRON job should execute to detect changes. Default is every 60 seconds. Undefined or empty uses the default. Minimum is every 1 second. There is no maximum. This must be an integer.                                                                                                                                                                                                                                                    |
-| DDNS_EXECUTION_FREQUENCY_MINUTES | 60                          | Determines how frequently the DDNS Service checks for a new public IP address. This setting only applies if you're using DDNS otherwise the service will not be started.                                                                                                                                                                                                                                                                                    |
-| PRESERVE_STOPPED                 | false                       | Determines if DNS entries for stopped containers are synchronised to the DNS server. `false` doesn't synchronise, meaning containers which are stopped will have their DNS entries removed. `true` means stopped containers won't have their entries removed. Removed containers will always have their DNS entries removed.                                                                                                                                |
-| DOCKER_SWARM_MODE                | false                       | Set to `true` to discover DNS entries from Docker Swarm services instead of containers. Labels must be set via `deploy.labels`. `PRESERVE_STOPPED` has no effect in Swarm mode — all services are always returned. |
-| API_TOKEN                        |                             | Optional. CloudFlare provider is enabled when API_TOKEN or API_TOKEN_FILE is set.<br/><br/>Your API token from Cloudflare. Must be granted Zone.Zone read and Zone.DNS edit.<br/><br/><span style="color: red; font-weight:bold">IMPORTANT</span> Use of this property is insecure as your API_TOKEN will be in plain text. It is recommended you use API_TOKEN_FILE. Use at your own risk.                                                                |
-| API_TOKEN_FILE                   |                             | Optional. CloudFlare provider is enabled when API_TOKEN or API_TOKEN_FILE is set.<br/><br/>Secure way to share your Cloudflare API Token with the project. Recommended approach for Docker Swarm. Compatible with Docker Compose (but less secure).<br/><br/>Read Docker Compose docs for more information: [Docker Compose Secrets](https://docs.docker.com/compose/use-secrets/)                                                                         |
-| MIKROTIK_BASEURL                 |                             | Optional. MikroTik provider is enabled when MIKROTIK_BASEURL, MIKROTIK_USERNAME and MIKROTIK_PASSWORD are all set.<br/><br/>Base URL of RouterOS REST API endpoint, for example: https://192.168.1.1                                                                                                                                                                                     |
-| MIKROTIK_USERNAME                |                             | Optional. MikroTik username. Required together with MIKROTIK_BASEURL and MIKROTIK_PASSWORD to enable MikroTik provider.                                                                                                                                                                                                                                                                     |
-| MIKROTIK_PASSWORD                |                             | Optional. MikroTik password. Required together with MIKROTIK_BASEURL and MIKROTIK_USERNAME to enable MikroTik provider.                                                                                                                                                                                                                                                                     |
-| MIKROTIK_SKIP_TLS_VERIFY         | false                       | Optional. If true, TLS certificate verification is disabled for MikroTik REST requests. Use only in trusted environments.                                                                                                                                                                                                                                                                   |
-| MIKROTIK_DEFAULT_TTL             | 3600                        | Optional. Default TTL in seconds for MikroTik-created records.                                                                                                                                                                                                                                                                                                                              |
-| RFC2136_TRANSPORT_URL            |                             | Optional. RFC2136 provider is enabled when all `RFC2136_*` required vars are set (TRANSPORT_URL, AUTH_MODE, HOSTS, ZONES, KERBEROS_REALM, KERBEROS_PRINCIPAL, KEYTAB_FILE). All-or-nothing.<br/><br/>URL of the rfc2136-transport sidecar. The orchestrator probes `<URL>/healthz` at startup.                                                                                              |
-| RFC2136_AUTH_MODE                |                             | Optional. Must be `gss-tsig` (only mode supported in this version).                                                                                                                                                                                                                                                                                                                         |
-| RFC2136_HOSTS                    |                             | Optional. Comma-separated **FQDNs** of AD DCs in failover order. **IPs and bare hostnames are rejected at startup** — AD GSS-TSIG binds the Kerberos service principal to the host you send the request to; with an IP or short name the KDC issues a ticket for an SPN the DC won't accept, producing `KDC_ERR_S_PRINCIPAL_UNKNOWN`/`KDC_ERR_WRONG_REALM` on every cycle. Use the DC's actual DNS hostname (e.g. `dc01.corp.example.com`). |
-| RFC2136_PORT                     | 53                          | Optional. UDP/TCP port used to talk to the AD DCs.                                                                                                                                                                                                                                                                                                                                          |
-| RFC2136_ZONES                    |                             | Optional. Comma-separated zones this provider manages.                                                                                                                                                                                                                                                                                                                                      |
-| RFC2136_KERBEROS_REALM           |                             | Optional. Kerberos realm in uppercase, e.g. `CORP.EXAMPLE.COM`.                                                                                                                                                                                                                                                                                                                             |
-| RFC2136_KERBEROS_PRINCIPAL       |                             | Optional. Service principal that the keytab authenticates, e.g. `svc-dns@CORP.EXAMPLE.COM`.                                                                                                                                                                                                                                                                                                 |
-| RFC2136_KEYTAB_FILE              |                             | Optional. Path **inside the sidecar container** to the keytab file. Typically `/run/secrets/rfc2136_keytab`.                                                                                                                                                                                                                                                                                |
-| RFC2136_KRB5_CONF                | /etc/krb5.conf              | Optional. Path inside the sidecar container to the `krb5.conf` file.                                                                                                                                                                                                                                                                                                                        |
-| RFC2136_DEFAULT_TTL              | 3600                        | Optional. Default TTL (seconds) applied to records created via RFC2136 when no per-entry TTL is supplied.                                                                                                                                                                                                                                                                                   |
-| RFC2136_MIN_TTL                  | 60                          | Optional. Minimum TTL (seconds) the provider will accept; values below this floor are clamped up.                                                                                                                                                                                                                                                                                           |
-| RFC2136_AXFR_TIMEOUT_SECONDS     | 30                          | Optional. Timeout (seconds) for AXFR zone-read requests against the sidecar.                                                                                                                                                                                                                                                                                                                |
-| RFC2136_UPDATE_TIMEOUT_SECONDS   | 15                          | Optional. Timeout (seconds) for DNS UPDATE apply requests against the sidecar.                                                                                                                                                                                                                                                                                                              |
-| RFC2136_CIRCUIT_BREAKER_THRESHOLD | 3                          | Optional. Consecutive failures against a single DC before the breaker trips and the orchestrator fails over to the next host in `RFC2136_HOSTS`.                                                                                                                                                                                                                                            |
-| RFC2136_DRY_RUN                  | false                       | Optional. If `true`, the orchestrator (and the sidecar) log intended changes but do not send DNS UPDATE.                                                                                                                                                                                                                                                                                    |
-| RFC2136_TAXFR                    | true                        | Optional. When `true` (default), the orchestrator reads zone state via AXFR each cycle for collision detection and drift reconciliation. Set `false` when AXFR is denied by your DCs (a common AD default — "Allow zone transfers only to servers listed on the Name Servers tab"). In TAXFR-off mode AXFR is skipped, the first available DC is pinned per zone, `getRecords()` returns `[]`, and writes rely entirely on UPDATE prerequisites for correctness (record-level drift is no longer detected). |
-| RFC2136_DOMAIN_FILTER            |                             | Optional. Comma-separated suffixes. When set, only entry names matching one of the suffixes are eligible for create/update/delete, and externally created records outside the filter are ignored by `getRecords()`. Lets you have a wide `RFC2136_ZONES` list but only manage a subset of names within those zones — e.g. `RFC2136_ZONES=corp.example.com`, `RFC2136_DOMAIN_FILTER=containers.corp.example.com`. |
-| RFC2136_KINIT_REFRESH_INTERVAL   | 12h                         | Sidecar-side env. Go duration syntax (`12h`, `30m`, `4h30m`). The sidecar re-runs `kinit -kt` on this interval so the TGT doesn't lapse mid-cycle once the default 24h Kerberos `ticket_lifetime` elapses. On refresh failure the sidecar's `/healthz` flips to `{"kerberos":"expired"}` with HTTP 503 until the next successful tick. |
-| LOG_LEVEL                        | error                       | The current logging level. The default is error, meaning only errors and fatal get logged.<br/><br/>Each level includes the levels above it from most specific to least specific. By way of example, verbose will output everything. debug will ignore verbose. log will ignore debug and verbose.<br/><br/>From most specific to least:</br>fatal<br/>error<br/>warn<br/>log<br/>debug<br/>verbose<br/><br/>These log levels come from the NestJS project. |
+| Variable | Default | Description |
+|---|---|---|
+| `PROJECT_LABEL` | `docker-dns-operator` | First half of the Docker label key the operator reads, and the ownership marker for managed records. |
+| `INSTANCE_ID` | `1` | Second half of the label key. Combined as `${PROJECT_LABEL}:${INSTANCE_ID}`. |
+| `EXECUTION_FREQUENCY_SECONDS` | `60` | Reconciliation interval. Integer, minimum 1, no maximum. |
+| `DDNS_EXECUTION_FREQUENCY_MINUTES` | `60` | Public IP check interval. Only active when at least one entry uses `"address": "DDNS"`. |
+| `PRESERVE_STOPPED` | `false` | If `true`, stopped containers keep their DNS entries. Removed containers always lose them. Ignored in Swarm mode. |
+| `DOCKER_SWARM_MODE` | `false` | If `true`, discover entries from Swarm services (`deploy.labels`) instead of containers. |
+| `LOG_LEVEL` | `error` | One of `fatal`, `error`, `warn`, `log`, `debug`, `verbose`. Invalid values currently cause the process to hang at startup. |
 
-#### PROJECT_LABEL and INSTANCE_ID
+CloudFlare:
 
-These two items combine to form the label which the project will look for on Docker Containers and write as an ownership comment for managed DNS records.
+| Variable | Default | Description |
+|---|---|---|
+| `API_TOKEN` |  | CloudFlare API token. Setting this OR `API_TOKEN_FILE` enables the provider. |
+| `API_TOKEN_FILE` |  | Path to a file containing the token. Preferred over `API_TOKEN`. |
 
-It is interpolated as follows: `${PROJECT_ID}:${INSTANCE_ID}`<br/><br/>
-For example:
-|PROJECT_ID|INSTANCE_ID|EXAMPLE|Use Case|
-|-|-|-|-|
-|docker-dns-operator|1|docker-dns-operator:1|The default|
-|docker-dns-operator|production|docker-dns-operator:production|Could be used to target a production Cloudflare subscription|
-|docker-dns-operator|production|docker-dns-operator:non-production|Targets the non-production Cloudflare subscription|
-|dns.com.mydomain|project|dns.com.mydomain:project|DNS entries for a specific subdomain of yours.
+MikroTik:
 
-Please note, in a large deployment the project label and instance id will become cruitial to management.<br/>
-For best practice, establish a naming convension and apply it consistently.
+| Variable | Default | Description |
+|---|---|---|
+| `MIKROTIK_BASEURL` |  | Base URL of the RouterOS REST API, e.g. `https://192.168.1.1`. All three MikroTik vars must be set together. |
+| `MIKROTIK_USERNAME` |  | API username. |
+| `MIKROTIK_PASSWORD` |  | API password. |
+| `MIKROTIK_SKIP_TLS_VERIFY` | `false` | Disable TLS verification. Trusted networks only. |
+| `MIKROTIK_DEFAULT_TTL` | `3600` | TTL applied to newly created records, in seconds. |
 
-### Labels
+RFC 2136 (all-or-nothing; every required variable must be set to enable the provider):
 
-The values of the Docker Compose labels correspond to DNS entries. You can find descriptions of the various DNS records here: [List of DNS Record Types](https://en.wikipedia.org/wiki/List_of_DNS_record_types).
+| Variable | Default | Description |
+|---|---|---|
+| `RFC2136_TRANSPORT_URL` |  | URL of the rfc2136-transport sidecar, e.g. `http://transport:9090`. Probed at `<URL>/healthz` on startup. |
+| `RFC2136_AUTH_MODE` |  | Only `gss-tsig` is supported. |
+| `RFC2136_HOSTS` |  | Comma-separated FQDNs of AD DCs in failover order. IPs and short names are rejected. |
+| `RFC2136_PORT` | `53` | UDP/TCP port for DNS UPDATE. |
+| `RFC2136_ZONES` |  | Comma-separated zones this provider manages. |
+| `RFC2136_KERBEROS_REALM` |  | Kerberos realm, uppercase (`CORP.EXAMPLE.COM`). |
+| `RFC2136_KERBEROS_PRINCIPAL` |  | Service principal the keytab authenticates (`svc-dns@CORP.EXAMPLE.COM`). |
+| `RFC2136_KEYTAB_FILE` |  | Path to the keytab **inside the sidecar container**, typically `/run/secrets/rfc2136_keytab`. |
+| `RFC2136_KRB5_CONF` | `/etc/krb5.conf` | Path to `krb5.conf` inside the sidecar. |
+| `RFC2136_DEFAULT_TTL` | `3600` | TTL when none is supplied per entry. |
+| `RFC2136_MIN_TTL` | `60` | Minimum TTL floor. Values below are clamped up. |
+| `RFC2136_AXFR_TIMEOUT_SECONDS` | `30` | AXFR request timeout. |
+| `RFC2136_UPDATE_TIMEOUT_SECONDS` | `15` | DNS UPDATE request timeout. |
+| `RFC2136_CIRCUIT_BREAKER_THRESHOLD` | `3` | Consecutive failures before failing over to the next DC. |
+| `RFC2136_DRY_RUN` | `false` | If `true`, log intended changes but do not apply. |
+| `RFC2136_TAXFR` | `true` | If `false`, skip AXFR (use when AD blocks zone transfers). Drift detection is reduced; writes rely on UPDATE prerequisites. |
+| `RFC2136_DOMAIN_FILTER` |  | Comma-separated name suffixes. Restricts which entries are managed without narrowing `RFC2136_ZONES`. |
+| `RFC2136_KINIT_REFRESH_INTERVAL` | `12h` | Sidecar setting. How often the TGT is refreshed. Go duration syntax. |
 
-Examples for all of these can be found in the [Examples](#examples) section below.
-For more details on the DNS record types, refer to the [DNS Entry Types](#dns-entry-types) section.
+### Label schema
 
-#### Provider Routing
-
-Each DNS entry can target one or more providers.
-
-- `providers` (preferred): array or string, such as `["cf"]`, `["mikrotik"]`, `["cf","mikrotik"]`, or `"all"`
-- `provider` (legacy singular): accepted and normalized to `providers`
-- If provider fields are omitted, the entry defaults to `["cf"]` for backward compatibility
-
-Provider-specific options:
-
-- CloudFlare proxy can be set as legacy top-level `proxy` or explicit `providerOptions.cf.proxy`
-- `proxy` applies to CloudFlare A/CNAME records; it is ignored by MikroTik
-
-Example:
+The operator reads a single Docker label whose **key** is `${PROJECT_LABEL}:${INSTANCE_ID}` and whose **value** is a JSON-stringified array of entry objects.
 
 ```yaml
 labels:
-  - 'docker-dns-operator:1=[
-    { "type": "A", "name": "public.example.com", "address": "1.2.3.4", "providers": ["cf","mikrotik"], "providerOptions": { "cf": { "proxy": true } } },
-    { "type": "A", "name": "internal.example.com", "address": "192.168.1.10", "providers": ["mikrotik"] }]'
+  docker-dns-operator:1: |
+    [
+      {
+        "type": "A",
+        "name": "app.example.com",
+        "address": "1.2.3.4",
+        "providers": ["cf", "mikrotik"],
+        "providerOptions": {
+          "cf": { "proxy": true },
+          "rfc2136": { "ttl": 600 }
+        }
+      }
+    ]
 ```
 
-#### A
+Per-entry fields common to every record type:
 
-The A record points a domain name to an IP address.  
-<br/><br/>
-name = example.com<br/>
-server = 8.8.8.8<br/><br/>
-Lookup of example.com returns 8.8.8.8<br/>
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | One of `A`, `AAAA`, `CNAME`, `MX`, `NS`. |
+| `name` | string | Fully-qualified record name. |
+| `providers` | string\|array | `["cf"]`, `["mikrotik"]`, `["rfc2136"]`, any combination, or the shorthand `"all"`. Defaults to `["cf"]` for backward compatibility when omitted. |
+| `provider` | string | Legacy singular form. Accepted and normalized to `providers`. |
+| `providerOptions` | object | Per-provider options, keyed by provider id. |
 
-The properties required for this entry are as follows:
+`providerOptions.cf.proxy` (boolean) controls CloudFlare proxying for A and CNAME records. `providerOptions.rfc2136.ttl` (integer seconds) overrides the default TTL for that entry on rfc2136. The legacy top-level `proxy` field is still accepted for CloudFlare entries.
 
-| property | value                                         | description                                                                                                                                                                                                                                                      |
-| -------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| type     | A                                             | The type of the record. In this case it should be A                                                                                                                                                                                                              |
-| name     | \<your domain name\>                          | This is the domain you want this A record to resolve for. For example: example-domain.com                                                                                                                                                                        |
-| address  | \<your server's address (v4 or 6)\> OR "DDNS" | The address you want your domain name to resolve to.</br> Or the string literal "DDNS" which instructs the project to compute your current public ipv4 address and use it for this record.                                                                       |
-| proxy    | true or false                                 | Optional, CloudFlare only. True uses Cloudflare's proxy to hide your address. False causes Cloudflare to act as a normal DNS server.<br/><br/>Documentation: [Proxied DNS Records](https://developers.cloudflare.com/dns/manage-dns-records/reference/proxied-dns-records/#proxied-records) |
+### Record types
 
-#### CNAME
+**A.** Points a name to an IPv4 address. Required: `address`. The literal string `"DDNS"` is accepted as the address value, which makes the operator resolve and use the host's current public IPv4.
 
-The CNAME record aliases the name to another A or CNAME record. Causing the name when queried to resolve to the A record it (eventually) resolves to.  
-<br/><br/>
-type = A<br/>
-name = example.com<br/>
-server = 8.8.8.8<br/>
-<br/>
-type = CNAME<br/>
-name = subdomain.example.com<br/>
-target = example.com<br/>
-<br/>
-type = CNAME<br/>
-name = lower.subdomain.example.com<br/>
-target = subdomain.example.com<br/>
-<br/>
-Lookup of example.com returns 8.8.8.8<br/>
-Lookup of subdomain.example.com returns 8.8.8.8<br/>
-Lookup of lower.subdomain.example.com returns 8.8.8.8<br/>
+**AAAA.** Points a name to an IPv6 address. Required: `address`. Currently only the rfc2136 provider accepts AAAA; CloudFlare and MikroTik throw at runtime.
 
-The properties required for this entry are as follows:
+**CNAME.** Aliases one name to another. Required: `target`. The target should resolve via an existing A or CNAME.
 
-| property | value                                  | description                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| -------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| type     | CNAME                                  | The type of the record. In this case it should be CNAME                                                                                                                                                                                                                                                                                                                                                                                                       |
-| name     | \<your alias\>                         | This is the alias you want this CNAME record to resolve for. For example: subdomain.example-domain.com                                                                                                                                                                                                                                                                                                                                                        |
-| target   | \<your full A record or CNAME record\> | The full name of the relevant A or CNAME record this should resolve to. For example, use 'example-domain.com' to point at the A record above.                                                                                                                                                                                                                                                                                                                 |
-| proxy    | true or false                          | Optional, CloudFlare only. True uses Cloudflare's proxy to hide your address. False causes Cloudflare to act as a normal DNS server.<br/><br/>Documentation: [Proxied DNS Records](https://developers.cloudflare.com/dns/manage-dns-records/reference/proxied-dns-records/#proxied-records)<br/><br/>Please note, only one level of subdomain can be proxied. If it's two subdomains deep (e.g. test.subdomain.example.com) it cannot be proxied unless you have a premium subscription. |
+**MX.** Declares a mail server for a domain. Required: `server`, `priority` (0–65535). The `server` should resolve via an existing A or CNAME.
 
-#### MX
+**NS.** Delegates a (sub)domain to another nameserver. Required: `server`.
 
-The MX record declares that a mail server handles mail for your domain or subdomain. The name is the domain or subdomain it handles mail for. The server points to an A or CNAME which resolves to your mail server. It's common to make a CNAME record for the mail server for this entry to point to.  
-<br/><br/>
-type = A<br/>
-name = example.com<br/>
-server = 8.8.8.8<br/>
-<br/>
-type = CNAME<br/>
-name = mx1.example.com<br/>
-target = example.com<br/>
-<br/>
-type = MX<br/>
-name = example.com<br/>
-target = mx1.example.com<br/>
-<br/>
-Lookup of example.com returns 8.8.8.8<br/>
-Lookup of mx1.example.com returns 8.8.8.8<br/>
-Lookup of mail server for example.com returns 8.8.8.8<br/>
-
-The properties required for this entry are as follows:
-
-| property | value                            | description                                                                                                                                                           |
-| -------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| type     | MX                               | The type of the record. In this case it should be MX                                                                                                                  |
-| name     | \<your domain\>                  | This is the domain you want this mail server to handle mail for. For example: example-domain.com                                                                      |
-| server   | \<full name of the mail server\> | The full name of the relevant A or CNAME entry this should resolve to. For example 'mx1.example-domain.com' (assuming you've made a CNAME or A record resolving mx1). |
-| priority | 0 to 65535                       | The priority of this mail server, allowing you to have more than one mail server for a domain. Must be an integer between the stated values.                          |
-
-#### NS
-
-The NS record points a domain or subdomain name to an A or CNAME record. DNS queries that match that domain or subdomain are forwarded to the server. This is typically used to point traffic on a subdomain to another name server. Such as one only accessible within a private network.  
-<br/><br/>
-type = A<br/>
-name = lan.example.com<br/>
-server = 192.168.0.1<br/>
-<br/>
-type = NS<br/>
-name = example.com<br/>
-server = lan.example.com<br/>
-<br/>
-Lookup of example.com returns lan.example.com<br/>
-Lookup of lan.example.com returns 192.168.0.1<br/>
-
-The properties required for this entry are as follows:
-
-| property | value                | description                                                                                                 |
-| -------- | -------------------- | ----------------------------------------------------------------------------------------------------------- |
-| type     | NS                   | The type of the record. In this case it should be NS                                                        |
-| name     | \<your domain name\> | This is the domain you want to forward queries for. For example: example-domain.com                         |
-| server   | \<your server name\> | The full name of the relevant A or CNAME entry this should resolve to. For example 'lan.example-domain.com' |
-
-## Docker Image Tags
-
-There are four types of image tag associated with this project:
-
-| tag                                         | example                                 | description                                                                                    |
-| ------------------------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| latest                                      | mrkhachaturov/docker-dns-operator:latest      | the latest release of the most recent major version                                            |
-| \<major version number\>-latest             | timk153/docker-external-dns:1-latest    | the latest release of that major version. In the example it's the latest release of version 1. |
-| semantic version number                     | timk153/docker-external-dns:1.4.2       | a specific release. In the example it's release 1.4.2                                          |
-| semantic version with additional identifier | timk153/docker-external-dns:1.4.2-alpha | a alpha, beta or development build. In the example it's an alpha release of version 1.4.2.     |
-
-All available tags can be found in the [docker hub public registry](https://hub.docker.com/repository/docker/timk153/docker-external-dns/tags).
+---
 
 ## Examples
 
-Below are a series of example configurations for the following usecases.
-Please note, all examples use the image tagged with latest.
-
-### Minimal configuration
-
-#### API_TOKEN
-
-This example demonstrates the most basic setup of the Docker Compose External DNS container with default values. It shows how to use the API_TOKEN environment variable and configure a single DNS entry.
-
-<span style="color: red; font-weight: bold;">IMPORTANT</span> API_TOKEN is insecure, API_TOKEN_FILE is recommended
+### Token in a file (recommended for CloudFlare)
 
 ```yaml
 services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
+  dns-operator:
+    image: mrkhachaturov/docker-dns-operator:latest
     environment:
-      - API_TOKEN=<your api token here>
-    volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
-```
-
-Explanation: This setup includes the docker-dns-operator service configured with the API_TOKEN environment variable. It will use the token to authenticate with Cloudflare. The other-service has a label that specifies a DNS A record for my-domain.com pointing to 8.8.8.8 with no proxy.
-
-#### API_TOKEN_FILE
-
-This configuration demonstrates the preferred method of passing the API token securely using Docker secrets. This is more secure than using API_TOKEN.
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - API_TOKEN_FILE=/run/secrets/CLOUDFLARE_API_TOKEN
+      API_TOKEN_FILE: /run/secrets/cloudflare_token
     secrets:
-      - CLOUDFLARE_API_TOKEN
+      - cloudflare_token
     volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
+  whoami:
+    image: traefik/whoami
     labels:
-      - 'docker-dns-operator:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
+      docker-dns-operator:1: |
+        [{ "type": "A", "name": "whoami.example.com", "address": "1.2.3.4" }]
 
 secrets:
-  CLOUDFLARE_API_TOKEN:
-    environment: 'CLOUDFLARE_API_TOKEN'
+  cloudflare_token:
+    file: ./cloudflare_token.txt
 ```
 
-Explanation: This setup uses Docker secrets to securely manage the Cloudflare API token. The API_TOKEN_FILE environment variable points to the secret file, which contains the API token. This approach is recommended for better security, especially in production environments.
-
-### PRESERVE_STOPPED
-
-This example demonstrates a configuration which preserves the DNS records for containers which become stopped.
+### Split routing: public to CloudFlare, internal to MikroTik
 
 ```yaml
 services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
+  dns-operator:
+    image: mrkhachaturov/docker-dns-operator:latest
     environment:
-      - API_TOKEN=<your api token here>
-      - PRESERVE_STOPPED=true
+      API_TOKEN_FILE: /run/secrets/cloudflare_token
+      MIKROTIK_BASEURL: https://192.168.1.1
+      MIKROTIK_USERNAME_FILE: /run/secrets/mikrotik_user
+      MIKROTIK_PASSWORD_FILE: /run/secrets/mikrotik_pass
+    secrets:
+      - cloudflare_token
+      - mikrotik_user
+      - mikrotik_pass
     volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
-```
-
-Explanation: This setup sets PRESERVE_STOPPED to true, meaning if other-service became stopped, the DNS entry would be preserved
-
-### Bespoke label, instance id, frequency and log level
-
-This example shows how to customize the label, instance ID, execution frequency, and log level settings.
-
-<span style="color: red; font-weight: bold;">IMPORTANT</span> example uses insecure option "API_TOKEN" for simplicity.
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - PROJECT_LABEL=dns.com.example
-      - INSTANCE_ID=project-subdomain
-      - EXECUTION_FREQUENCY_SECONDS=120
-      - LOG_LEVEL=info
-      - API_TOKEN=<your api token here>
-    volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'dns.com.example:project-subdomain=[{ "type": "CNAME", "name": "project.example.com", "target": "example.com", "proxy": true }]'
-```
-
-Explanation: In this configuration:<br/>
-<br/>
-PROJECT_LABEL is set to dns.com.example, which is used as part of the label on Docker containers.<br/>
-INSTANCE_ID is set to project-subdomain to differentiate this instance.<br/>
-EXECUTION_FREQUENCY_SECONDS is set to 120, meaning the DNS updates will occur every 2 minutes.<br/>
-LOG_LEVEL is set to info to log informational messages as well as warnings and errors.<br/>
-The other-service has a CNAME record pointing project.example.com to example.com with proxy enabled.<br/>
-
-### Two domains, one service
-
-This example illustrates managing DNS entries for multiple domains using a single docker-dns-operator service.
-Please note, your API_TOKEN(\_FILE) will require permissions for both domains.
-
-<span style="color: red; font-weight: bold;">IMPORTANT</span> example uses insecure option "API_TOKEN" for simplicity.
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - API_TOKEN=<your api token here>
-    volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[
-        { "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false },
-        { "type": "A", "name": "my-other-domain.org", "address": "8.8.8.8", "proxy": true }]'
-```
-
-Explanation: This setup shows how to handle DNS records for two different domains (my-domain.com and my-other-domain.org) with one instance of docker-dns-operator. Each domain has its own A record configuration. The my-other-domain.org entry uses Cloudflare's proxy.
-
-### Two domains, two services
-
-These configurations demonstrates how to manage DNS records for different domains using separate docker-dns-operator services.
-
-#### INSTANCE_ID
-
-<span style="color: red; font-weight: bold;">IMPORTANT</span> example uses insecure option "API_TOKEN" for simplicity.
-
-```yaml
-services:
-  docker-dns-operator-1:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - API_TOKEN=<api token for my-domain.com here>
-    volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-docker-dns-operator-2:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - INSTANCE_ID=2
-      - API_TOKEN=<api token for my-other-domain.org here>
-    volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
-      - 'docker-dns-operator:2=[{ "type": "A", "name": "my-other-domain.org", "address": "8.8.8.8", "proxy": true }]'
-```
-
-Explanation: This setup uses two separate docker-dns-operator services to manage DNS entries for my-domain.com and my-other-domain.org. Each service is configured with its own API token and instance ID. This allows for independent management of DNS entries for each domain.
-
-#### PROJECT_LABEL
-
-<span style="color: red; font-weight: bold;">IMPORTANT</span> example uses insecure option "API_TOKEN" for simplicity.
-
-```yaml
-services:
-  docker-dns-operator-1:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - PROJECT_LABEL=dns.com.my-domain
-      - API_TOKEN=<api token for my-domain.com here>
-    volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-docker-dns-operator-2:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - PROJECT_LABEL=dns.org.my-other-domain
-      - API_TOKEN=<api token for my-other-domain.org here>
-    volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'dns.com.my-domain:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
-      - 'dns.org.my-other-domain:1=[{ "type": "A", "name": "my-other-domain.org", "address": "8.8.8.8", "proxy": true }]'
-```
-
-Explanation: This setup uses two separate docker-dns-operator services to manage DNS entries for my-domain.com and my-other-domain.org. Each service is configured with its own API token and project label. This allows for independent management of DNS entries for each domain.
-
-### DNS Entry types
-
-The final set of examples demonstrates different types of DNS records (A, CNAME, NS, MX) and how to configure them using Docker Compose labels.
-Please note, these labels may live on one or more services spead across one or more docker-compose files running on Docker. They are all on "other-service" in this instance for simplicity sake.
-
-#### A
-
-<span style="color: red; font-weight: bold;">IMPORTANT</span> example uses insecure option "API_TOKEN" for simplicity.
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - API_TOKEN=<your api token here>
-    volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[{ "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false }]'
-```
-
-Explanation: This example configures an A record for my-domain.com pointing to 8.8.8.8 without using Cloudflare's proxy.
-
-##### DDNS Variant
-
-<span style="color: red; font-weight: bold;">IMPORTANT</span> example uses insecure option "API_TOKEN" for simplicity.
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - API_TOKEN=<your api token here>
-    volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[{ "type": "A", "name": "my-domain.com", "address": "DDNS", "proxy": false }]'
-```
-
-Explanation: This example configures an A record for my-domain.com. The project will start the DDNS Service when this record is processed. The service will fetch your current public ipv4 address and use it for this record. The DDNS Service will check at regular intervals for a new ipv4 address. If one is detected then this record will be updated to the new value when the next DNS synchronisation interval is reached.
-
-Settings to control interval are explained in the [configuration section](#configuration).
-
-#### CNAME
-
-<span style="color: red; font-weight: bold;">IMPORTANT</span> example uses insecure option "API_TOKEN" for simplicity.
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - API_TOKEN=<your api token here>
-    volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[
-        { "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false },
-        { "type": "CNAME", "name": "sub.my-domain.com", "target": "my-domain.com", "proxy": false }]'
-```
-
-Explanation: This setup includes a CNAME record that aliases sub.my-domain.com to my-domain.com, following the A record configuration for my-domain.com.
-
-#### NS
-
-<span style="color: red; font-weight: bold;">IMPORTANT</span> example uses insecure option "API_TOKEN" for simplicity.
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - API_TOKEN=<your api token here>
-    volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[
-        { "type": "A", "name": "lan.my-domain.com", "address": "192.168.0.1", "proxy": false },
-        { "type": "CNAME", "name": "ns1.lan.my-domain.com", "target": "lan.my-domain.com", "proxy": false },
-        { "type": "NS", "name": "lan.my-domain.com", "server": "ns1.lan.my-domain.com" }]'
-```
-
-Explanation: This configuration includes an NS record specifying ns1.lan.my-domain.com as the nameserver for lan.my-domain.com, alongside an A record for lan.my-domain.com.
-
-#### MX
-
-<span style="color: red; font-weight: bold;">IMPORTANT</span> example uses insecure option "API_TOKEN" for simplicity.
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - API_TOKEN=<your api token here>
-    volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[
-        { "type": "A", "name": "my-domain.com", "address": "8.8.8.8", "proxy": false },
-        { "type": "CNAME", "name": "mx1.my-domain.com", "target": "my-domain.com", "proxy": false },
-        { "type": "MX", "name": "my-domain.com", "server": "mx1.my-domain.com", "priority": 0 }]'
-```
-
-Explanation: This example sets up an MX record for my-domain.com that points to mx1.my-domain.com with a priority of 0. This is used to specify the mail server for the domain.
-
-#### All together
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - API_TOKEN=<your api token here>
-    volumes:
-      # Used to read labels from containers - readonly
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[
-        { "type": "A", "name": "my-domain.com", "address": "DDNS", "proxy": false },
-        { "type": "CNAME", "name": "mx1.my-domain.com", "target": "my-domain.com", "proxy": false },
-        { "type": "MX", "name": "my-domain.com", "server": "mx1.my-domain.com", "priority": 0 },
-        { "type": "CNAME", "name": "subdomain.my-domain.com", "target": "my-domain.com", "proxy": false },
-        { "type": "A", "name": "lan.my-domain.com", "address": "192.168.0.1", "proxy": false },
-        { "type": "CNAME", "name": "ns1.lan.my-domain.com", "target": "lan.my-domain.com", "proxy": false },
-        { "type": "NS", "name": "lan.my-domain.com", "server": "ns1.lan.my-domain.com" }]'
-```
-
-### MikroTik
-
-#### Minimal configuration
-
-This example shows the simplest MikroTik-only setup. The MikroTik REST API runs on the same port as the web interface (`www` — port 80, or `www-ssl` — port 443).
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - MIKROTIK_BASEURL=http://192.168.1.1
-      - MIKROTIK_USERNAME=<your username>
-      - MIKROTIK_PASSWORD=<your password>
-    volumes:
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[
-          { "type": "A", "name": "myservice.lan", "address": "192.168.1.50", "providers": ["mikrotik"] }]'
-```
-
-Explanation: Connects to the MikroTik REST API at `http://192.168.1.1` (port 80). The `providers` field routes the entry to MikroTik. Managed records are tagged with an ownership comment (`docker-dns-operator:1`) so the service only modifies records it created.
-
-#### Self-signed TLS certificate
-
-If your MikroTik uses HTTPS with a self-signed certificate (common in home labs), set `MIKROTIK_SKIP_TLS_VERIFY=true`.
-
-<span style="color: red; font-weight: bold;">WARNING</span> Only use `MIKROTIK_SKIP_TLS_VERIFY=true` in trusted private networks. It disables TLS certificate validation.
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - MIKROTIK_BASEURL=https://192.168.1.1
-      - MIKROTIK_USERNAME=<your username>
-      - MIKROTIK_PASSWORD=<your password>
-      - MIKROTIK_SKIP_TLS_VERIFY=true
-    volumes:
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[
-          { "type": "A", "name": "myservice.lan", "address": "192.168.1.50", "providers": ["mikrotik"] }]'
-```
-
-#### Custom TTL
-
-Use `MIKROTIK_DEFAULT_TTL` to control the TTL (in seconds) applied to newly created records. Default is `3600` (1 hour).
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - MIKROTIK_BASEURL=http://192.168.1.1
-      - MIKROTIK_USERNAME=<your username>
-      - MIKROTIK_PASSWORD=<your password>
-      - MIKROTIK_DEFAULT_TTL=300
-    volumes:
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  other-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[
-          { "type": "A", "name": "myservice.lan", "address": "192.168.1.50", "providers": ["mikrotik"] }]'
-```
-
-### Multi-provider (CloudFlare + MikroTik)
-
-These examples show how to run both providers simultaneously. Each DNS entry declares which provider(s) it targets via the `providers` field.
-
-#### Split routing — public to CloudFlare, internal to MikroTik
-
-A common homelab pattern: public-facing records go to CloudFlare, internal LAN records go to MikroTik.
-
-<span style="color: red; font-weight: bold;">IMPORTANT</span> example uses insecure option "API_TOKEN" for simplicity.
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - API_TOKEN=<your cloudflare api token>
-      - MIKROTIK_BASEURL=http://192.168.1.1
-      - MIKROTIK_USERNAME=<your username>
-      - MIKROTIK_PASSWORD=<your password>
-    volumes:
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  my-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[
-          { "type": "A", "name": "myservice.my-domain.com", "address": "1.2.3.4",       "providers": ["cf"],        "providerOptions": { "cf": { "proxy": true } } },
-          { "type": "A", "name": "myservice.lan",           "address": "192.168.1.50",  "providers": ["mikrotik"] }]'
-```
-
-Explanation: `myservice.my-domain.com` is published to CloudFlare with proxying enabled. `myservice.lan` is created as an internal A record on MikroTik. Each record only goes to its designated provider.
-
-#### Same record to both providers
-
-Use `"providers": ["cf", "mikrotik"]` (or the shorthand `"providers": "all"`) to push a record to every configured provider.
-
-```yaml
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - API_TOKEN=<your cloudflare api token>
-      - MIKROTIK_BASEURL=http://192.168.1.1
-      - MIKROTIK_USERNAME=<your username>
-      - MIKROTIK_PASSWORD=<your password>
-    volumes:
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  my-service:
-    image: 'busybox:latest'
-    command: 'sleep 3600'
-    labels:
-      - 'docker-dns-operator:1=[
-          { "type": "A", "name": "myservice.my-domain.com", "address": "1.2.3.4", "providers": "all" }]'
-```
-
-Explanation: The single A record is created on both CloudFlare and MikroTik. Useful when you want internal DNS to mirror public DNS for split-horizon setups.
-
-### Docker Swarm
-
-Set `DOCKER_SWARM_MODE=true` to enable Swarm service discovery.
-
-DNS labels must be set at the **service** level using `deploy.labels`, not the top-level `labels` key:
-
-```yaml
-version: "3.8"
-services:
-  docker-dns-operator:
-    image: 'mrkhachaturov/docker-dns-operator:latest'
-    environment:
-      - API_TOKEN=<your cloudflare api token>
-      - DOCKER_SWARM_MODE=true
-    volumes:
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-
-  myapp:
+  app:
     image: nginx
-    deploy:
-      labels:
-        - 'docker-dns-operator:1=[{ "type": "A", "name": "myapp.example.com", "address": "1.2.3.4" }]'
-```
-
-> **Note:** `PRESERVE_STOPPED` has no effect in Swarm mode. All services are always returned.
-
-### Routing an entry to AD DNS via RFC2136
-
-The service reads ONE Docker label keyed by `ENTRY_IDENTIFIER` (default `docker-dns-operator:1`); its value is a JSON-stringified array of entry objects:
-
-```yaml
-services:
-  myapp:
-    image: myapp:latest
     labels:
-      # Replace the key prefix with your actual ENTRY_IDENTIFIER.
       docker-dns-operator:1: |
         [
-          {
-            "type": "A",
-            "name": "app.internal.corp",
-            "address": "10.20.30.40",
-            "providers": ["rfc2136"],
-            "providerOptions": { "rfc2136": { "ttl": 600 } }
-          }
+          { "type": "A", "name": "app.example.com", "address": "1.2.3.4",
+            "providers": ["cf"], "providerOptions": { "cf": { "proxy": true } } },
+          { "type": "A", "name": "app.lan", "address": "192.168.1.50",
+            "providers": ["mikrotik"] }
         ]
 ```
 
-Use `"providers": ["rfc2136", "cf"]` to write the same entry to both AD and CloudFlare. To register multiple records from one container, add more objects to the JSON array.
-
-### AAAA records
-
-`rfc2136` is currently the only provider in this fork that handles `AAAA` records. The CloudFlare and MikroTik providers will throw at runtime if asked to handle an `AAAA` entry — use the `providers` field to keep `AAAA` entries on `rfc2136` only:
+### DDNS (public IPv4 of the host)
 
 ```yaml
 labels:
-  - 'docker-dns-operator:1=[
-      { "type": "AAAA", "name": "app.internal.corp", "address": "2001:db8::42", "providers": ["rfc2136"] }]'
+  docker-dns-operator:1: |
+    [{ "type": "A", "name": "home.example.com", "address": "DDNS" }]
 ```
 
-If you need `AAAA` support on another provider, route the entry only to `rfc2136` until that provider gains `AAAA` handling.
+The operator starts the DDNS service when any entry uses `"DDNS"`, queries the current public IPv4 every `DDNS_EXECUTION_FREQUENCY_MINUTES`, and updates the record when the IP changes.
+
+### Two domains, two operator instances
+
+Independent CloudFlare tokens by `INSTANCE_ID`:
+
+```yaml
+services:
+  dns-a:
+    image: mrkhachaturov/docker-dns-operator:latest
+    environment:
+      INSTANCE_ID: a
+      API_TOKEN_FILE: /run/secrets/token_a
+    secrets: [token_a]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  dns-b:
+    image: mrkhachaturov/docker-dns-operator:latest
+    environment:
+      INSTANCE_ID: b
+      API_TOKEN_FILE: /run/secrets/token_b
+    secrets: [token_b]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  app:
+    image: nginx
+    labels:
+      docker-dns-operator:a: '[{ "type": "A", "name": "a.com", "address": "1.2.3.4" }]'
+      docker-dns-operator:b: '[{ "type": "A", "name": "b.org", "address": "5.6.7.8" }]'
+```
+
+### Active Directory (RFC 2136)
+
+```yaml
+services:
+  dns-operator:
+    image: mrkhachaturov/docker-dns-operator:latest
+    environment:
+      RFC2136_TRANSPORT_URL: http://transport:9090
+      RFC2136_AUTH_MODE: gss-tsig
+      RFC2136_HOSTS: dc01.corp.example.com,dc02.corp.example.com
+      RFC2136_ZONES: corp.example.com
+      RFC2136_KERBEROS_REALM: CORP.EXAMPLE.COM
+      RFC2136_KERBEROS_PRINCIPAL: svc-dns@CORP.EXAMPLE.COM
+      RFC2136_KEYTAB_FILE: /run/secrets/rfc2136_keytab
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  transport:
+    image: mrkhachaturov/docker-dns-operator-transport:latest
+    environment:
+      RFC2136_KERBEROS_REALM: CORP.EXAMPLE.COM
+      RFC2136_KERBEROS_PRINCIPAL: svc-dns@CORP.EXAMPLE.COM
+      RFC2136_KEYTAB_FILE: /run/secrets/rfc2136_keytab
+    secrets:
+      - rfc2136_keytab
+
+  app:
+    image: nginx
+    labels:
+      docker-dns-operator:1: |
+        [{ "type": "A", "name": "app.corp.example.com", "address": "10.20.30.40",
+           "providers": ["rfc2136"],
+           "providerOptions": { "rfc2136": { "ttl": 600 } } }]
+
+secrets:
+  rfc2136_keytab:
+    file: ./rfc2136.keytab
+```
+
+See [docs/rfc2136-integration-runbook.md](docs/rfc2136-integration-runbook.md) for the full setup: creating the AD service account, generating the keytab, granting Allow Authenticated Users to update its own records, and validating end-to-end.
+
+### Docker Swarm
+
+Labels must live under `deploy.labels` (the Swarm-level location), not the top-level `labels` key:
+
+```yaml
+services:
+  dns-operator:
+    image: mrkhachaturov/docker-dns-operator:latest
+    environment:
+      DOCKER_SWARM_MODE: "true"
+      API_TOKEN_FILE: /run/secrets/cloudflare_token
+    secrets: [cloudflare_token]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+  app:
+    image: nginx
+    deploy:
+      labels:
+        docker-dns-operator:1: '[{ "type": "A", "name": "app.example.com", "address": "1.2.3.4" }]'
+```
+
+`PRESERVE_STOPPED` has no effect in Swarm mode. The operator must run on a manager node so it can list services.
+
+---
+
+## Operations
+
+**Image tags.** Published on Docker Hub as [`mrkhachaturov/docker-dns-operator`](https://hub.docker.com/r/mrkhachaturov/docker-dns-operator). Tags:
+
+| Tag | Meaning |
+|---|---|
+| `latest` | Most recent release across all major versions. |
+| `<major>-latest` | Most recent release of that major version, e.g. `1-latest`. |
+| `<semver>` | Specific release, e.g. `1.0.0`. |
+| `<semver>-<pre>` | Pre-release builds, e.g. `1.1.0-alpha`. |
+
+**Logging.** `LOG_LEVEL` maps to the NestJS logger and orders from most-specific to least: `fatal` → `error` → `warn` → `log` → `debug` → `verbose`. Each level includes everything above it. Production deployments typically run at `warn` or `error`.
+
+**Health.** The main operator does not currently expose an HTTP health endpoint. The rfc2136-transport sidecar exposes `/healthz` on port 9090; HTTP 200 means Kerberos is alive, 503 means the TGT could not be refreshed.
+
+**Failure modes worth knowing.**
+
+- An invalid `LOG_LEVEL` makes the process hang at startup with no output. If startup hangs, the log level is the first thing to check.
+- The rfc2136 provider is all-or-nothing: every required variable must be set, or the provider is silently not registered and entries routed to `rfc2136` are dropped with a warning.
+- AAAA records on CloudFlare or MikroTik will throw at runtime. Route AAAA only to `rfc2136`.
+
+---
+
+## Security
+
+**API tokens.** Use `API_TOKEN_FILE` over `API_TOKEN`. Plain env vars leak into `docker inspect`, image layers, and container exec output. CloudFlare tokens should be scoped to the minimum: `Zone.Zone:Read` and `Zone.DNS:Edit`, restricted to the specific zones you manage.
+
+**MikroTik credentials.** RouterOS accounts used here should have only the `dns` and `read` group permissions, never `full`. Pair this with a dedicated user that is denied console/SSH access on the router side.
+
+**Keytab (rfc2136).** Mount via a Docker secret, never via a bind mount that's world-readable on the host. The AD service account behind the keytab should have permissions to update only the zones listed in `RFC2136_ZONES`. Typically that means granting "Write" on those zones in DNS Manager and revoking write everywhere else.
+
+**Docker socket.** The operator needs read access to `/var/run/docker.sock`. Mount it `:ro`. In Swarm or hostile multi-tenant environments, consider [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) to expose only the `containers` and `services` endpoints.
+
+**TLS.** `MIKROTIK_SKIP_TLS_VERIFY=true` disables certificate validation. Only use it on networks where MITM is not in your threat model.
+
+---
+
+## Development
+
+Requirements: Node.js ≥ 22.11, Yarn 1.22.x (classic, not Berry).
+
+```bash
+yarn install
+yarn start:dev          # watch mode
+yarn build              # nest build → dist/
+
+yarn lint               # eslint --fix
+yarn format             # prettier --write
+
+yarn test               # unit
+yarn test:cov           # unit with coverage
+yarn test:e2e           # e2e (uses testcontainers; Docker required)
+```
+
+Adding a new provider means implementing the `DnsProvider` interface in [src/providers/dns-provider.interface.ts](src/providers/dns-provider.interface.ts), registering it in [provider-registry.service.ts](src/providers/provider-registry.service.ts), wiring config in [app.configuration.ts](src/app.configuration.ts), and updating [app.module.ts](src/app.module.ts). Unit specs live next to the code; e2e specs live under `test/`.
+
+The rfc2136 sidecar lives in [transport-rfc2136/](transport-rfc2136/) and is a separate Go module with its own build and tests.
+
+Conventions, architecture notes, and contribution guidelines for AI assistants are in [CLAUDE.md](CLAUDE.md).
+
+---
+
+## Credits
+
+Started as a fork of [timk153/docker-external-dns](https://github.com/timk153/docker-external-dns) and has since diverged substantially. Conceptual debt to [kubernetes-sigs/external-dns](https://github.com/kubernetes-sigs/external-dns) and [dntsk/extdns](https://github.com/dntsk/extdns). Built on [NestJS](https://github.com/nestjs/nest).
+
+## License
+
+[MIT](LICENSE).
