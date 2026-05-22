@@ -12,7 +12,7 @@
 | 🔄 | Reconciler | Reads labels every `EXECUTION_FREQUENCY_SECONDS`, diffs, applies |
 | 🌐 | Providers | Cloudflare, MikroTik RouterOS, RFC 2136 / Active Directory |
 | 🛡️ | Ownership | TXT marker `ddo-<type>.<name>`. Pre-existing records are never touched |
-| 🧩 | Records | A, AAAA (rfc2136), CNAME, MX, NS |
+| 🧩 | Records | A, AAAA (RFC 2136 only), CNAME, MX, NS |
 
 > [!TIP]
 > Two instances with different `INSTANCE_ID`s can manage the same zone without conflicting. Each instance only sees and modifies records carrying its own ownership marker.
@@ -126,7 +126,7 @@ Supports A, CNAME, MX, NS, with optional proxying via `providerOptions.cf.proxy`
 
 ### 📡 MikroTik RouterOS
 
-Enabled when `MIKROTIK_BASEURL`, `MIKROTIK_USERNAME`, and `MIKROTIK_PASSWORD` are all set. Talks to the RouterOS REST API on the same port as the web UI (`www` 80 / `www-ssl` 443).
+Enabled when `MIKROTIK_BASEURL` is set and either `MIKROTIK_USERNAME`/`MIKROTIK_PASSWORD` or their `_FILE` variants are provided. Talks to the RouterOS REST API on the same port as the web UI (`www` 80 / `www-ssl` 443).
 
 Supports A, CNAME, MX, NS.
 
@@ -134,7 +134,7 @@ If your router uses a self-signed certificate, set `MIKROTIK_SKIP_TLS_VERIFY=tru
 
 ### 🏢 RFC 2136 / Active Directory (via webhook sidecar)
 
-Enabled when the full `RFC2136_*` block is set on the operator AND the [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) webhook sidecar is running with its own keytab/Kerberos config. Uses the same RFC 2136 provider model as [external-dns](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/rfc2136.md), with GSS-TSIG for Active Directory.
+Enabled when the required operator-side `RFC2136_*` variables are set and the [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) webhook sidecar is reachable at `RFC2136_WEBHOOK_URL`. Uses the same RFC 2136 provider model as [external-dns](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/rfc2136.md), with GSS-TSIG for Active Directory.
 
 Supports A, AAAA, CNAME, MX, NS.
 
@@ -234,7 +234,7 @@ All variables below must be set, or the rfc2136 provider is not registered. Entr
 
 </details>
 
-**Sidecar env (set on the `ddo-rfc2136` container):** documented in the [sidecar repo README](https://github.com/mrkhachaturov/ddo-rfc2136#required-env-vars). Each webhook sidecar owns its own configuration docs, matching the [external-dns webhook-provider model](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/webhook-provider.md). `RFC2136_KERBEROS_REALM` and `RFC2136_KERBEROS_PRINCIPAL` are duplicated on both containers — the operator validates them at startup so misconfiguration fails fast; the sidecar uses them at runtime.
+**Sidecar env (set on the `ddo-rfc2136` container):** documented in the [sidecar repo README](https://github.com/mrkhachaturov/ddo-rfc2136#required-env-vars). Each webhook sidecar owns its own configuration docs, matching the [external-dns webhook-provider model](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/webhook-provider.md). `RFC2136_KERBEROS_REALM` and `RFC2136_KERBEROS_PRINCIPAL` are duplicated on both containers — the operator validates them at startup so misconfiguration fails fast; the sidecar uses them at runtime. The operator never reads the keytab and never obtains Kerberos tickets; it only validates that its routing config matches the sidecar identity.
 
 ### 🏷️ Label schema
 
