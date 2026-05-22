@@ -687,6 +687,60 @@ describe('App Configuration', () => {
     );
   });
 
+  describe('loadConfigurationMikrotikSecretFiles', () => {
+    const envUsernameFile = '/run/secrets/mikrotik_user';
+    const envPasswordFile = '/run/secrets/mikrotik_pass';
+
+    beforeEach(() => {
+      delete process.env.API_TOKEN;
+      delete process.env.API_TOKEN_FILE;
+      delete process.env.MIKROTIK_BASEURL;
+      delete process.env.MIKROTIK_USERNAME;
+      delete process.env.MIKROTIK_USERNAME_FILE;
+      delete process.env.MIKROTIK_PASSWORD;
+      delete process.env.MIKROTIK_PASSWORD_FILE;
+    });
+
+    it('resolves both username and password from secret files', async () => {
+      process.env.MIKROTIK_BASEURL = 'https://192.168.1.1';
+      process.env.MIKROTIK_USERNAME_FILE = envUsernameFile;
+      process.env.MIKROTIK_PASSWORD_FILE = envPasswordFile;
+      mockReadFileSync
+        .mockReturnValueOnce('admin\n')
+        .mockReturnValueOnce('s3cret\n');
+
+      const sut = await getSystemUnderTest();
+
+      expect(sut.get('MIKROTIK_USERNAME', { infer: true })).toBe('admin');
+      expect(sut.get('MIKROTIK_PASSWORD', { infer: true })).toBe('s3cret');
+    });
+
+    it('throws if MIKROTIK_USERNAME_FILE cannot be read', async () => {
+      process.env.MIKROTIK_BASEURL = 'https://192.168.1.1';
+      process.env.MIKROTIK_USERNAME_FILE = envUsernameFile;
+      process.env.MIKROTIK_PASSWORD = 'pw';
+      const error = new Error('file-read-error');
+      mockReadFileSync.mockImplementationOnce(() => {
+        throw error;
+      });
+
+      await expect(getSystemUnderTest()).rejects.toThrow(
+        /MIKROTIK_USERNAME_FILE.*Failed reading secret file/,
+      );
+    });
+
+    it('throws if MIKROTIK_PASSWORD_FILE resolves to an empty file', async () => {
+      process.env.MIKROTIK_BASEURL = 'https://192.168.1.1';
+      process.env.MIKROTIK_USERNAME = 'admin';
+      process.env.MIKROTIK_PASSWORD_FILE = envPasswordFile;
+      mockReadFileSync.mockReturnValueOnce('   \n');
+
+      await expect(getSystemUnderTest()).rejects.toThrow(
+        /MIKROTIK_PASSWORD_FILE.*Failed reading secret file/,
+      );
+    });
+  });
+
   describe('loadConfigurationComposedConstants', () => {
     it('should compose ENTRY_IDENTIFIER', async () => {
       // arrange

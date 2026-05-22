@@ -188,9 +188,11 @@ See [docs/rfc2136-integration-runbook.md](docs/rfc2136-integration-runbook.md) f
 
 | Variable | Default | Description |
 |---|---|---|
-| `MIKROTIK_BASEURL` |  | Base URL of the RouterOS REST API, e.g. `https://192.168.1.1`. All three vars must be set together. |
-| `MIKROTIK_USERNAME` |  | API username. |
-| `MIKROTIK_PASSWORD` |  | API password. |
+| `MIKROTIK_BASEURL` |  | Base URL of the RouterOS REST API, e.g. `https://192.168.1.1`. Required to enable the provider. |
+| `MIKROTIK_USERNAME` |  | API username. Set this OR `MIKROTIK_USERNAME_FILE`. |
+| `MIKROTIK_USERNAME_FILE` |  | Path to a file containing the username, e.g. `/run/secrets/mikrotik_user`. Preferred over `MIKROTIK_USERNAME`. |
+| `MIKROTIK_PASSWORD` |  | API password. Set this OR `MIKROTIK_PASSWORD_FILE`. |
+| `MIKROTIK_PASSWORD_FILE` |  | Path to a file containing the password, e.g. `/run/secrets/mikrotik_pass`. Preferred over `MIKROTIK_PASSWORD`. |
 | `MIKROTIK_SKIP_TLS_VERIFY` | `false` | Disable TLS verification. Trusted networks only. |
 | `MIKROTIK_DEFAULT_TTL` | `3600` | TTL applied to newly created records, in seconds. |
 
@@ -304,10 +306,12 @@ services:
     environment:
       API_TOKEN_FILE: /run/secrets/cloudflare_token
       MIKROTIK_BASEURL: "https://192.168.1.1"
-      MIKROTIK_USERNAME: admin
-      MIKROTIK_PASSWORD: changeme
+      MIKROTIK_USERNAME_FILE: /run/secrets/mikrotik_user
+      MIKROTIK_PASSWORD_FILE: /run/secrets/mikrotik_pass
     secrets:
       - cloudflare_token
+      - mikrotik_user
+      - mikrotik_pass
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
