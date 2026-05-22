@@ -28,6 +28,7 @@ export class Rfc2136Factory {
   buildCreateChangeSet(
     entry: DnsbaseEntry,
     ttl: number | undefined,
+    options: { skipOwnershipTxtPrereq?: boolean } = {},
   ): ChangeSet {
     const rec = this.entryToRecord(entry, ttl);
     const ownershipName = Rfc2136Factory.ownershipName(rec.type, rec.name);
@@ -37,16 +38,21 @@ export class Rfc2136Factory {
       ttl: rec.ttl,
       value: this.ownershipValue(),
     };
-    return {
-      prerequisites: [
-        { kind: 'NXRRSET', name: rec.name, type: rec.type },
-        { kind: 'NXRRSET', name: ownershipName, type: 'TXT' },
-      ],
-      changes: [
-        { op: 'add', record: rec },
-        { op: 'add', record: ownershipTxt },
-      ],
-    };
+    const prerequisites: Prerequisite[] = [
+      { kind: 'NXRRSET', name: rec.name, type: rec.type },
+    ];
+    if (!options.skipOwnershipTxtPrereq) {
+      prerequisites.push({
+        kind: 'NXRRSET',
+        name: ownershipName,
+        type: 'TXT',
+      });
+    }
+    const changes: Change[] = [{ op: 'add', record: rec }];
+    if (!options.skipOwnershipTxtPrereq) {
+      changes.push({ op: 'add', record: ownershipTxt });
+    }
+    return { prerequisites, changes };
   }
 
   buildUpdateChangeSet(

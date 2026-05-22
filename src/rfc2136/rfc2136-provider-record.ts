@@ -74,8 +74,10 @@ export class Rfc2136ProviderRecord implements IProviderRecord {
 
   private ttlMatches(desired: DnsbaseEntry): boolean {
     const explicitTtl = desired.providerOptions?.rfc2136?.ttl;
-    if (explicitTtl === undefined) return true;
-    const effectiveDesired = Math.max(explicitTtl, this.ttlOpts.minTtl);
+    const effectiveDesired = Math.max(
+      explicitTtl ?? this.ttlOpts.defaultTtl,
+      this.ttlOpts.minTtl,
+    );
     const effectiveRaw = Math.max(this.raw.ttl, this.ttlOpts.minTtl);
     return effectiveDesired === effectiveRaw;
   }

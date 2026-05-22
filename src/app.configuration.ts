@@ -55,13 +55,34 @@ export const validationSchema = Joi.object({
   RFC2136_TRANSPORT_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .optional(),
-  RFC2136_AUTH_MODE: Joi.string()
-    .valid('gss-tsig', 'hmac-tsig', 'insecure')
-    .optional(),
+  RFC2136_AUTH_MODE: Joi.string().valid('gss-tsig').optional(),
   RFC2136_HOSTS: Joi.string()
-    .pattern(
-      /^([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)+[a-z]{2,}(,([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)+[a-z]{2,})*$/i,
-    )
+    .custom((value: string, helpers) => {
+      const entries = value
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      if (entries.length === 0) {
+        return helpers.error('any.invalid');
+      }
+      // eslint-disable-next-line no-restricted-syntax
+      for (const entry of entries) {
+        const isIpv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(entry);
+        const isIpv6 = entry.includes(':');
+        const isBareLabel = !entry.includes('.');
+        if (isIpv4 || isIpv6 || isBareLabel) {
+          return helpers.message({
+            custom: `RFC2136_HOSTS entry "${entry}" is not an FQDN. AD GSS-TSIG requires FQDN host names; expect KDC_ERR_S_PRINCIPAL_UNKNOWN with IP/short names.`,
+          });
+        }
+        if (!/^([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(entry)) {
+          return helpers.message({
+            custom: `RFC2136_HOSTS entry "${entry}" is not a valid FQDN.`,
+          });
+        }
+      }
+      return value;
+    })
     .optional(),
   RFC2136_PORT: Joi.number().integer().min(1).max(65535).default(53),
   RFC2136_ZONES: Joi.string().optional(),
@@ -77,6 +98,8 @@ export const validationSchema = Joi.object({
   RFC2136_UPDATE_TIMEOUT_SECONDS: Joi.number().integer().min(1).default(15),
   RFC2136_CIRCUIT_BREAKER_THRESHOLD: Joi.number().integer().min(1).default(3),
   RFC2136_DRY_RUN: Joi.boolean().default(false),
+  RFC2136_TAXFR: Joi.boolean().default(true),
+  RFC2136_DOMAIN_FILTER: Joi.string().optional(),
 })
   .custom((value, helpers) => {
     // Partial MikroTik config check: all-or-nothing
@@ -207,7 +230,7 @@ export interface IConfiguration {
   MIKROTIK_SKIP_TLS_VERIFY: boolean;
   MIKROTIK_DEFAULT_TTL: number;
   RFC2136_TRANSPORT_URL?: string;
-  RFC2136_AUTH_MODE?: 'gss-tsig' | 'hmac-tsig' | 'insecure';
+  RFC2136_AUTH_MODE?: 'gss-tsig';
   RFC2136_HOSTS?: string;
   RFC2136_PORT: number;
   RFC2136_ZONES?: string;
@@ -221,4 +244,6 @@ export interface IConfiguration {
   RFC2136_UPDATE_TIMEOUT_SECONDS: number;
   RFC2136_CIRCUIT_BREAKER_THRESHOLD: number;
   RFC2136_DRY_RUN: boolean;
+  RFC2136_TAXFR: boolean;
+  RFC2136_DOMAIN_FILTER?: string;
 }

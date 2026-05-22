@@ -162,9 +162,17 @@ export class AppService extends CronService {
         ...diff.delete.map((e) => provider.deleteEntry(e)),
       ]);
 
-      this.loggerService.log(
-        `[${provider.providerKey}] Synchronisation complete: Added ${diff.add.length}, Updated ${diff.update.length}, Deleted ${diff.delete.length}, Unchanged ${diff.unchanged.length}`,
-      );
+      const totalChanges =
+        diff.add.length + diff.update.length + diff.delete.length;
+      if (totalChanges > 0) {
+        this.loggerService.log(
+          `[${provider.providerKey}] Synchronisation complete: Added ${diff.add.length}, Updated ${diff.update.length}, Deleted ${diff.delete.length}, Unchanged ${diff.unchanged.length}`,
+        );
+      } else {
+        this.loggerService.debug(
+          `[${provider.providerKey}] Synchronisation complete: no changes, Unchanged ${diff.unchanged.length}`,
+        );
+      }
     }
   }
 

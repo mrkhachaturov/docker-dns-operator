@@ -70,26 +70,6 @@ describe('Rfc2136Service', () => {
   });
 
   describe('initialize', () => {
-    it('throws on unsupported auth mode', () => {
-      config.get.mockImplementation(
-        (key: string) =>
-          (
-            ({
-              RFC2136_TRANSPORT_URL: 'http://transport:9090',
-              RFC2136_AUTH_MODE: 'hmac-tsig',
-              RFC2136_HOSTS: 'dc01.corp.example.com',
-              RFC2136_ZONES: 'corp.example.com',
-              RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
-              RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
-              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
-            }) as Record<string, unknown>
-          )[key],
-      );
-      expect(() => service.initialize()).toThrow(
-        /hmac-tsig is not implemented/,
-      );
-    });
-
     it('silently no-ops when not configured', () => {
       config.get.mockReturnValue(undefined);
       expect(() => service.initialize()).not.toThrow();
@@ -711,6 +691,469 @@ describe('Rfc2136Service', () => {
       });
       transport.apply.mockResolvedValue({ ok: true });
       await service.deleteEntry(oldRec);
+      expect(transport.apply).toHaveBeenCalled();
+    });
+  });
+
+  describe('multi-DC failover on write', () => {
+    beforeEach(() => {
+      config.get.mockImplementation(
+        (key: string) =>
+          (
+            ({
+              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_AUTH_MODE: 'gss-tsig',
+              RFC2136_HOSTS:
+                'dc01.corp.example.com,dc02.corp.example.com,dc03.corp.example.com',
+              RFC2136_PORT: 53,
+              RFC2136_ZONES: 'zone-a.example.com',
+              RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
+              RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
+              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
+              RFC2136_DEFAULT_TTL: 300,
+              RFC2136_MIN_TTL: 60,
+              PROJECT_LABEL: 'docker-compose-external-dns',
+              INSTANCE_ID: '1',
+            }) as Record<string, unknown>
+          )[key],
+      );
+      service.initialize();
+      (service as any).pinnedDcForZone.set(
+        'zone-a.example.com',
+        'dc01.corp.example.com',
+      );
+      (service as any).availableDcsThisCycle = [
+        'dc01.corp.example.com',
+        'dc02.corp.example.com',
+        'dc03.corp.example.com',
+      ];
+      factory.buildCreateChangeSet.mockReturnValue({
+        prerequisites: [],
+        changes: [],
+      });
+    });
+
+    it('retries on next DC after first returns REFUSED — succeeds on DC2', async () => {
+      transport.apply.mockImplementation(async (req) => {
+        if (req.host === 'dc01.corp.example.com') {
+          return {
+            ok: false,
+            rcode: 'REFUSED',
+            phase: 'dns-receive',
+            message: 'denied',
+            retryable: false,
+          };
+        }
+        return { ok: true };
+      });
+
+      const { DnsaEntry } = await import('../dto/dnsa-entry');
+      const entry = Object.assign(new DnsaEntry(), {
+        name: 'app.zone-a.example.com',
+        address: '10.0.0.1',
+      });
+      await service.createEntry(entry);
+
+      expect(transport.apply).toHaveBeenCalledTimes(2);
+      expect(transport.apply).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ host: 'dc01.corp.example.com' }),
+        expect.any(Number),
+      );
+      expect(transport.apply).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ host: 'dc02.corp.example.com' }),
+        expect.any(Number),
+      );
+      expect(
+        (service as any).unhealthyZonesThisCycle.has('zone-a.example.com'),
+      ).toBe(false);
+      // Pin migrates to the working DC.
+      expect((service as any).pinnedDcForZone.get('zone-a.example.com')).toBe(
+        'dc02.corp.example.com',
+      );
+    });
+
+    it('marks zone unhealthy after ALL DCs exhausted', async () => {
+      transport.apply.mockResolvedValue({
+        ok: false,
+        rcode: 'SERVFAIL',
+        phase: 'dns-receive',
+        message: 'fail',
+        retryable: true,
+      });
+
+      const { DnsaEntry } = await import('../dto/dnsa-entry');
+      const entry = Object.assign(new DnsaEntry(), {
+        name: 'app.zone-a.example.com',
+        address: '10.0.0.1',
+      });
+      await service.createEntry(entry);
+
+      expect(transport.apply).toHaveBeenCalledTimes(3);
+      expect(
+        (service as any).unhealthyZonesThisCycle.has('zone-a.example.com'),
+      ).toBe(true);
+    });
+
+    it('does not failover on non-retryable, non-failover-eligible failure (e.g. NXRRSET)', async () => {
+      transport.apply.mockResolvedValue({
+        ok: false,
+        rcode: 'NXRRSET',
+        phase: 'dns-receive',
+        message: 'prereq failed',
+        retryable: false,
+      });
+
+      const { DnsaEntry } = await import('../dto/dnsa-entry');
+      const entry = Object.assign(new DnsaEntry(), {
+        name: 'app.zone-a.example.com',
+        address: '10.0.0.1',
+      });
+      await service.createEntry(entry);
+
+      expect(transport.apply).toHaveBeenCalledTimes(1);
+      expect(
+        (service as any).unhealthyZonesThisCycle.has('zone-a.example.com'),
+      ).toBe(true);
+    });
+  });
+
+  describe('orphan ownership TXT handling', () => {
+    beforeEach(() => {
+      config.get.mockImplementation(
+        (key: string) =>
+          (
+            ({
+              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_AUTH_MODE: 'gss-tsig',
+              RFC2136_HOSTS: 'dc01.corp.example.com',
+              RFC2136_PORT: 53,
+              RFC2136_ZONES: 'zone-a.example.com',
+              RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
+              RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
+              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
+              RFC2136_DEFAULT_TTL: 300,
+              RFC2136_MIN_TTL: 60,
+              PROJECT_LABEL: 'docker-compose-external-dns',
+              INSTANCE_ID: '1',
+            }) as Record<string, unknown>
+          )[key],
+      );
+      service.initialize();
+    });
+
+    it('detects orphan ownership TXT during prepareForJob and createEntry omits NXRRSET-TXT prereq', async () => {
+      transport.getRecords.mockResolvedValue({
+        ok: true,
+        records: [
+          {
+            name: 'dnsync-a.app.zone-a.example.com',
+            type: 'TXT',
+            ttl: 300,
+            value: '"owned-by=docker-compose-external-dns:1"',
+          },
+        ],
+      });
+      await service.prepareForJob();
+      expect(
+        (service as any).orphanOwnershipNames.has(
+          'dnsync-a.app.zone-a.example.com',
+        ),
+      ).toBe(true);
+
+      factory.buildCreateChangeSet.mockReturnValue({
+        prerequisites: [
+          { kind: 'NXRRSET', name: 'app.zone-a.example.com', type: 'A' },
+        ],
+        changes: [
+          {
+            op: 'add',
+            record: {
+              name: 'app.zone-a.example.com',
+              type: 'A',
+              ttl: 300,
+              value: '10.0.0.1',
+            },
+          },
+        ],
+      });
+      transport.apply.mockResolvedValue({ ok: true });
+
+      const { DnsaEntry } = await import('../dto/dnsa-entry');
+      const entry = Object.assign(new DnsaEntry(), {
+        name: 'app.zone-a.example.com',
+        address: '10.0.0.1',
+      });
+      await service.createEntry(entry);
+
+      expect(factory.buildCreateChangeSet).toHaveBeenCalledWith(
+        expect.anything(),
+        undefined,
+        expect.objectContaining({ skipOwnershipTxtPrereq: true }),
+      );
+      expect(transport.apply).toHaveBeenCalled();
+    });
+  });
+
+  describe('CNAME-vs-A collision pre-detection', () => {
+    beforeEach(() => {
+      config.get.mockImplementation(
+        (key: string) =>
+          (
+            ({
+              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_AUTH_MODE: 'gss-tsig',
+              RFC2136_HOSTS: 'dc01.corp.example.com',
+              RFC2136_PORT: 53,
+              RFC2136_ZONES: 'zone-a.example.com',
+              RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
+              RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
+              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
+              PROJECT_LABEL: 'docker-compose-external-dns',
+              INSTANCE_ID: '1',
+            }) as Record<string, unknown>
+          )[key],
+      );
+      service.initialize();
+      (service as any).pinnedDcForZone.set(
+        'zone-a.example.com',
+        'dc01.corp.example.com',
+      );
+      (service as any).availableDcsThisCycle = ['dc01.corp.example.com'];
+    });
+
+    it('skips A create when AXFR shows a CNAME at the same name', async () => {
+      (service as any).rawAxfrCache.set('zone-a.example.com', [
+        {
+          name: 'app.zone-a.example.com',
+          type: 'CNAME',
+          ttl: 300,
+          value: 'other.example.com.',
+        },
+      ]);
+
+      const { DnsaEntry } = await import('../dto/dnsa-entry');
+      const entry = Object.assign(new DnsaEntry(), {
+        name: 'app.zone-a.example.com',
+        address: '10.0.0.1',
+      });
+      await service.createEntry(entry);
+      expect(transport.apply).not.toHaveBeenCalled();
+    });
+
+    it('skips CNAME create when AXFR shows any other type at the same name', async () => {
+      (service as any).rawAxfrCache.set('zone-a.example.com', [
+        {
+          name: 'app.zone-a.example.com',
+          type: 'A',
+          ttl: 300,
+          value: '10.0.0.1',
+        },
+      ]);
+
+      const { DnsCnameEntry } = await import('../dto/dnscname-entry');
+      const entry = Object.assign(new DnsCnameEntry(), {
+        name: 'app.zone-a.example.com',
+        target: 'other.example.com',
+      });
+      await service.createEntry(entry);
+      expect(transport.apply).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('domain filter', () => {
+    beforeEach(() => {
+      config.get.mockImplementation(
+        (key: string) =>
+          (
+            ({
+              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_AUTH_MODE: 'gss-tsig',
+              RFC2136_HOSTS: 'dc01.corp.example.com',
+              RFC2136_PORT: 53,
+              RFC2136_ZONES: 'zone-a.example.com',
+              RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
+              RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
+              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
+              RFC2136_DOMAIN_FILTER: 'containers.zone-a.example.com',
+              PROJECT_LABEL: 'docker-compose-external-dns',
+              INSTANCE_ID: '1',
+            }) as Record<string, unknown>
+          )[key],
+      );
+      service.initialize();
+      (service as any).pinnedDcForZone.set(
+        'zone-a.example.com',
+        'dc01.corp.example.com',
+      );
+      (service as any).availableDcsThisCycle = ['dc01.corp.example.com'];
+      factory.buildCreateChangeSet.mockReturnValue({
+        prerequisites: [],
+        changes: [],
+      });
+      factory.buildUpdateChangeSet.mockReturnValue({
+        prerequisites: [],
+        changes: [],
+      });
+      factory.buildDeleteChangeSet.mockReturnValue({
+        prerequisites: [],
+        changes: [],
+      });
+    });
+
+    it('rejects createEntry outside the filter', async () => {
+      const { DnsaEntry } = await import('../dto/dnsa-entry');
+      const entry = Object.assign(new DnsaEntry(), {
+        name: 'admin.zone-a.example.com',
+        address: '10.0.0.1',
+      });
+      await service.createEntry(entry);
+      expect(transport.apply).not.toHaveBeenCalled();
+    });
+
+    it('rejects updateEntry outside the filter', async () => {
+      const oldRec = new Rfc2136ProviderRecord(
+        {
+          name: 'admin.zone-a.example.com',
+          type: 'A',
+          ttl: 300,
+          value: '10.0.0.1',
+        },
+        'zone-a.example.com',
+        { defaultTtl: 3600, minTtl: 60 },
+      );
+      const { DnsaEntry } = await import('../dto/dnsa-entry');
+      const desired = Object.assign(new DnsaEntry(), {
+        name: 'admin.zone-a.example.com',
+        address: '10.0.0.99',
+      });
+      await service.updateEntry(oldRec, desired);
+      expect(transport.apply).not.toHaveBeenCalled();
+    });
+
+    it('rejects deleteEntry outside the filter', async () => {
+      const oldRec = new Rfc2136ProviderRecord(
+        {
+          name: 'admin.zone-a.example.com',
+          type: 'A',
+          ttl: 300,
+          value: '10.0.0.1',
+        },
+        'zone-a.example.com',
+        { defaultTtl: 3600, minTtl: 60 },
+      );
+      await service.deleteEntry(oldRec);
+      expect(transport.apply).not.toHaveBeenCalled();
+    });
+
+    it('filters out records outside the filter in getRecords', async () => {
+      (service as any).rawAxfrCache.set('zone-a.example.com', [
+        {
+          name: 'web.containers.zone-a.example.com',
+          type: 'A',
+          ttl: 300,
+          value: '10.0.0.1',
+        },
+        {
+          name: 'dnsync-a.web.containers.zone-a.example.com',
+          type: 'TXT',
+          ttl: 300,
+          value: '"owned-by=docker-compose-external-dns:1"',
+        },
+        {
+          name: 'admin.zone-a.example.com',
+          type: 'A',
+          ttl: 300,
+          value: '10.0.0.2',
+        },
+        {
+          name: 'dnsync-a.admin.zone-a.example.com',
+          type: 'TXT',
+          ttl: 300,
+          value: '"owned-by=docker-compose-external-dns:1"',
+        },
+      ]);
+      const records = await service.getRecords();
+      expect(records).toHaveLength(1);
+      expect(records[0].name).toBe('web.containers.zone-a.example.com');
+    });
+
+    it('allows createEntry inside the filter', async () => {
+      transport.apply.mockResolvedValue({ ok: true });
+      const { DnsaEntry } = await import('../dto/dnsa-entry');
+      const entry = Object.assign(new DnsaEntry(), {
+        name: 'web.containers.zone-a.example.com',
+        address: '10.0.0.1',
+      });
+      await service.createEntry(entry);
+      expect(transport.apply).toHaveBeenCalled();
+    });
+  });
+
+  describe('TAXFR=false mode', () => {
+    beforeEach(() => {
+      config.get.mockImplementation(
+        (key: string) =>
+          (
+            ({
+              RFC2136_TRANSPORT_URL: 'http://transport:9090',
+              RFC2136_AUTH_MODE: 'gss-tsig',
+              RFC2136_HOSTS: 'dc01.corp.example.com,dc02.corp.example.com',
+              RFC2136_PORT: 53,
+              RFC2136_ZONES: 'zone-a.example.com',
+              RFC2136_KERBEROS_REALM: 'CORP.EXAMPLE.COM',
+              RFC2136_KERBEROS_PRINCIPAL: 'svc-dns@CORP.EXAMPLE.COM',
+              RFC2136_KEYTAB_FILE: '/run/secrets/keytab',
+              RFC2136_TAXFR: false,
+              PROJECT_LABEL: 'docker-compose-external-dns',
+              INSTANCE_ID: '1',
+            }) as Record<string, unknown>
+          )[key],
+      );
+      service.initialize();
+    });
+
+    it('prepareForJob skips AXFR and deterministically pins first available DC', async () => {
+      await service.prepareForJob();
+      expect(transport.getRecords).not.toHaveBeenCalled();
+      expect((service as any).pinnedDcForZone.get('zone-a.example.com')).toBe(
+        'dc01.corp.example.com',
+      );
+    });
+
+    it('getRecords returns [] in TAXFR-off mode', async () => {
+      await service.prepareForJob();
+      const records = await service.getRecords();
+      expect(records).toEqual([]);
+    });
+
+    it('createEntry still issues UPDATE using only prereqs (no collision pre-check)', async () => {
+      await service.prepareForJob();
+      factory.buildCreateChangeSet.mockReturnValue({
+        prerequisites: [
+          { kind: 'NXRRSET', name: 'app.zone-a.example.com', type: 'A' },
+        ],
+        changes: [
+          {
+            op: 'add',
+            record: {
+              name: 'app.zone-a.example.com',
+              type: 'A',
+              ttl: 300,
+              value: '10.0.0.1',
+            },
+          },
+        ],
+      });
+      transport.apply.mockResolvedValue({ ok: true });
+
+      const { DnsaEntry } = await import('../dto/dnsa-entry');
+      const entry = Object.assign(new DnsaEntry(), {
+        name: 'app.zone-a.example.com',
+        address: '10.0.0.1',
+      });
+      await service.createEntry(entry);
       expect(transport.apply).toHaveBeenCalled();
     });
   });

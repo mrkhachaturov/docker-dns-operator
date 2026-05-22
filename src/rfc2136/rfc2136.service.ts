@@ -13,11 +13,16 @@ import { Rfc2136Factory } from './rfc2136.factory';
 import { Rfc2136ProviderRecord } from './rfc2136-provider-record';
 import { Rfc2136TransportClient } from './transport-client';
 import { ZoneQueue } from './zone-queue';
-import { Rfc2136Record, Rfc2136RecordType } from './types';
+import {
+  ApplyRequest,
+  ApplyResponse,
+  Rfc2136Record,
+  Rfc2136RecordType,
+} from './types';
 
 interface ResolvedConfig {
   transportUrl: string;
-  authMode: 'gss-tsig' | 'hmac-tsig' | 'insecure';
+  authMode: 'gss-tsig';
   hosts: string[];
   port: number;
   zones: string[];
@@ -27,7 +32,11 @@ interface ResolvedConfig {
   updateTimeoutMs: number;
   circuitBreakerThreshold: number;
   dryRun: boolean;
+  taxfr: boolean;
+  domainFilter: string[];
 }
+
+const FAILOVER_RCODES = new Set(['SERVFAIL', 'REFUSED', 'NOTAUTH']);
 
 @Injectable()
 export class Rfc2136Service implements IDnsProvider {
@@ -41,6 +50,8 @@ export class Rfc2136Service implements IDnsProvider {
 
   private pinnedDcForZone = new Map<string, string>();
 
+  private availableDcsThisCycle: string[] = [];
+
   private axfrCache = new Map<string, Rfc2136ProviderRecord[]>();
 
   private rawAxfrCache = new Map<string, Rfc2136Record[]>();
@@ -48,6 +59,8 @@ export class Rfc2136Service implements IDnsProvider {
   private dcConsecutiveFailures = new Map<string, number>();
 
   private dcCircuitOpenUntil = new Map<string, number>();
+
+  private orphanOwnershipNames = new Set<string>();
 
   private ownershipLabel = '';
 
@@ -73,12 +86,7 @@ export class Rfc2136Service implements IDnsProvider {
 
   initialize(): void {
     if (!this.isConfigured()) return;
-    const authMode = this.config.get<string>('RFC2136_AUTH_MODE');
-    if (authMode !== 'gss-tsig') {
-      throw new Error(
-        `RFC2136_AUTH_MODE=${authMode} is not implemented in this version. v1 supports gss-tsig only.`,
-      );
-    }
+    const domainFilterRaw = this.config.get<string>('RFC2136_DOMAIN_FILTER');
     this.resolved = {
       transportUrl: this.config.get<string>('RFC2136_TRANSPORT_URL')!,
       authMode: 'gss-tsig',
@@ -101,6 +109,13 @@ export class Rfc2136Service implements IDnsProvider {
         this.config.get('RFC2136_CIRCUIT_BREAKER_THRESHOLD') ?? 3,
       ),
       dryRun: this.config.get<boolean>('RFC2136_DRY_RUN') === true,
+      taxfr: this.config.get<boolean>('RFC2136_TAXFR') !== false,
+      domainFilter: domainFilterRaw
+        ? domainFilterRaw
+            .split(',')
+            .map((s) => s.trim().toLowerCase().replace(/\.$/, ''))
+            .filter((s) => s.length > 0)
+        : [],
     };
     const projectLabel =
       this.config.get<string>('PROJECT_LABEL') ?? 'docker-compose-external-dns';
@@ -108,7 +123,7 @@ export class Rfc2136Service implements IDnsProvider {
     this.ownershipLabel = `${projectLabel}:${instanceId}`;
     this.zoneQueue.setGate((zone) => !this.unhealthyZonesThisCycle.has(zone));
     this.logger.log(
-      `[rfc2136] initialised — hosts=${this.resolved.hosts.join(',')} zones=${this.resolved.zones.join(',')}`,
+      `[rfc2136] initialised — hosts=${this.resolved.hosts.join(',')} zones=${this.resolved.zones.join(',')} taxfr=${this.resolved.taxfr}${this.resolved.domainFilter.length ? ` domain-filter=${this.resolved.domainFilter.join(',')}` : ''}`,
     );
   }
 
@@ -138,6 +153,7 @@ export class Rfc2136Service implements IDnsProvider {
     this.pinnedDcForZone.clear();
     this.axfrCache.clear();
     this.rawAxfrCache.clear();
+    this.orphanOwnershipNames.clear();
 
     const now = Date.now();
     const availableDcs = this.resolved.hosts.filter((dc) => {
@@ -150,6 +166,27 @@ export class Rfc2136Service implements IDnsProvider {
       }
       return true;
     });
+    this.availableDcsThisCycle = availableDcs;
+
+    if (!this.resolved.taxfr) {
+      // TAXFR disabled — pin first available DC per zone deterministically.
+      // No reads — we rely on UPDATE prerequisites for collision detection.
+      if (availableDcs.length === 0) {
+        // eslint-disable-next-line no-restricted-syntax
+        for (const zone of this.resolved.zones) {
+          this.unhealthyZonesThisCycle.add(zone);
+        }
+        this.logger.error(
+          '[rfc2136] no available DCs (all circuits open) — zones unhealthy this cycle',
+        );
+        return;
+      }
+      // eslint-disable-next-line no-restricted-syntax
+      for (const zone of this.resolved.zones) {
+        this.pinnedDcForZone.set(zone, availableDcs[0]);
+      }
+      return;
+    }
 
     const dcSuccessfulThisCycle = new Set<string>();
     const dcTriedThisCycle = new Set<string>();
@@ -185,6 +222,8 @@ export class Rfc2136Service implements IDnsProvider {
       }
     }
 
+    this.detectOrphanOwnershipTxts();
+
     // eslint-disable-next-line no-restricted-syntax
     for (const dc of dcTriedThisCycle) {
       if (dcSuccessfulThisCycle.has(dc)) {
@@ -211,8 +250,40 @@ export class Rfc2136Service implements IDnsProvider {
     }
   }
 
+  private detectOrphanOwnershipTxts(): void {
+    const ownershipValue = `"owned-by=${this.ownershipLabel}"`;
+    this.rawAxfrCache.forEach((records, zone) => {
+      const byName = new Map<string, Rfc2136Record[]>();
+      // eslint-disable-next-line no-restricted-syntax
+      for (const r of records) {
+        const arr = byName.get(r.name) ?? [];
+        arr.push(r);
+        byName.set(r.name, arr);
+      }
+      // eslint-disable-next-line no-restricted-syntax
+      for (const r of records) {
+        // eslint-disable-next-line no-continue
+        if (r.type !== 'TXT' || r.value !== ownershipValue) continue;
+        const m = r.name.match(/^dnsync-([a-z]+)\.(.+)$/);
+        // eslint-disable-next-line no-continue
+        if (!m) continue;
+        const [, typeLc, ownedName] = m;
+        const ownedType = typeLc.toUpperCase();
+        const siblings = byName.get(ownedName) ?? [];
+        const dataExists = siblings.some((s) => s.type === ownedType);
+        if (!dataExists) {
+          this.orphanOwnershipNames.add(r.name);
+          this.logger.warn(
+            `[rfc2136] orphan ownership TXT detected zone=${zone} name=${r.name} — will allow recreate without NXRRSET prereq on this TXT`,
+          );
+        }
+      }
+    });
+  }
+
   async getRecords(): Promise<IProviderRecord[]> {
     if (!this.resolved) return [];
+    if (!this.resolved.taxfr) return [];
 
     const ownershipValue = `"owned-by=${this.ownershipLabel}"`;
     const out: Rfc2136ProviderRecord[] = [];
@@ -244,6 +315,8 @@ export class Rfc2136Service implements IDnsProvider {
       for (const r of raw) {
         // eslint-disable-next-line no-continue
         if (r.type === 'TXT') continue;
+        // eslint-disable-next-line no-continue
+        if (!this.matchesDomainFilter(r.name)) continue;
         const types = ownershipIndex.get(r.name);
         // eslint-disable-next-line no-continue
         if (!types || !types.has(r.type)) continue;
@@ -270,6 +343,12 @@ export class Rfc2136Service implements IDnsProvider {
 
   async createEntry(entry: DnsbaseEntry): Promise<void> {
     if (!this.resolved) return;
+    if (!this.matchesDomainFilter(entry.name)) {
+      this.logger.warn(
+        `[rfc2136] entry ${entry.name} excluded by RFC2136_DOMAIN_FILTER — skipping`,
+      );
+      return;
+    }
     const zone = this.zoneFor(entry.name);
     if (!zone) {
       this.logger.warn(
@@ -281,50 +360,62 @@ export class Rfc2136Service implements IDnsProvider {
       const raw = this.rawAxfrCache.get(zone) ?? [];
       const targetType = this.entryTypeName(entry);
       const ownershipName = `dnsync-${targetType.toLowerCase()}.${entry.name.toLowerCase()}`;
-      const existing = raw.find(
-        (r) =>
-          r.name.toLowerCase() === entry.name.toLowerCase() &&
-          r.type === targetType,
-      );
-      if (existing) {
-        const hasOurOwnership = raw.some(
-          (r) =>
-            r.name === ownershipName &&
-            r.type === 'TXT' &&
-            r.value === `"owned-by=${this.ownershipLabel}"`,
+      const skipOwnershipTxtPrereq =
+        this.orphanOwnershipNames.has(ownershipName);
+
+      // Collision detection: only meaningful when we have AXFR cache (TAXFR=true).
+      // RFC 1034 §3.6.2: CNAME is mutually exclusive with all other types at the same name.
+      if (this.resolved!.taxfr) {
+        const sameName = raw.filter(
+          (r) => r.name.toLowerCase() === entry.name.toLowerCase(),
         );
-        if (!hasOurOwnership) {
+        const existingSameType = sameName.find((r) => r.type === targetType);
+        const existingCname = sameName.find((r) => r.type === 'CNAME');
+        const wantsCname = targetType === 'CNAME';
+        const wantsNonCnameWithCname = !wantsCname && !!existingCname;
+        const wantsCnameWithAnyOther =
+          wantsCname && sameName.some((r) => r.type !== 'CNAME');
+
+        if (wantsNonCnameWithCname || wantsCnameWithAnyOther) {
           this.logger.warn(
-            `[rfc2136] create collision — unowned ${targetType} record exists at ${entry.name} — skipping`,
+            `[rfc2136] create collision — RFC1034 §3.6.2 conflict at ${entry.name} (want=${targetType}, existing types=${[
+              ...new Set(sameName.map((r) => r.type)),
+            ].join(',')}) — skipping`,
           );
           return;
+        }
+
+        if (existingSameType) {
+          const hasOurOwnership = raw.some(
+            (r) =>
+              r.name === ownershipName &&
+              r.type === 'TXT' &&
+              r.value === `"owned-by=${this.ownershipLabel}"`,
+          );
+          if (!hasOurOwnership) {
+            this.logger.warn(
+              `[rfc2136] create collision — unowned ${targetType} record exists at ${entry.name} — skipping`,
+            );
+            return;
+          }
         }
       }
 
       const ttl = entry.providerOptions?.rfc2136?.ttl;
-      const cs = this.factory.buildCreateChangeSet(entry, ttl);
+      const cs = this.factory.buildCreateChangeSet(entry, ttl, {
+        skipOwnershipTxtPrereq,
+      });
       if (this.resolved!.dryRun) {
         this.logger.log(
           `[rfc2136][dry-run] would create ${entry.name} type=${targetType}`,
         );
         return;
       }
-      const res = await this.transport.apply(
-        {
-          host: this.pinnedDcForZone.get(zone)!,
-          port: this.resolved!.port,
-          zone,
-          prerequisites: cs.prerequisites,
-          changes: cs.changes,
-        },
-        this.resolved!.updateTimeoutMs,
-      );
-      if (!res.ok) {
-        this.logger.error(
-          `[rfc2136] create failed zone=${zone} name=${entry.name} phase=${res.phase} rcode=${res.rcode ?? 'none'} message=${res.message}`,
-        );
-        this.unhealthyZonesThisCycle.add(zone);
-      }
+      await this.applyWithFailover(zone, {
+        prerequisites: cs.prerequisites,
+        changes: cs.changes,
+        labelForLog: `create name=${entry.name}`,
+      });
     });
   }
 
@@ -333,6 +424,12 @@ export class Rfc2136Service implements IDnsProvider {
     desired: DnsbaseEntry,
   ): Promise<void> {
     if (!this.resolved) return;
+    if (!this.matchesDomainFilter(desired.name)) {
+      this.logger.warn(
+        `[rfc2136] entry ${desired.name} excluded by RFC2136_DOMAIN_FILTER — skipping update`,
+      );
+      return;
+    }
     const { zone } = old.providerContext as { zone: string };
     await this.zoneQueue.enqueue(zone, async () => {
       const oldRaw = (old.providerContext as { raw: Rfc2136Record }).raw;
@@ -342,27 +439,22 @@ export class Rfc2136Service implements IDnsProvider {
         this.logger.log(`[rfc2136][dry-run] would update ${desired.name}`);
         return;
       }
-      const res = await this.transport.apply(
-        {
-          host: this.pinnedDcForZone.get(zone)!,
-          port: this.resolved!.port,
-          zone,
-          prerequisites: cs.prerequisites,
-          changes: cs.changes,
-        },
-        this.resolved!.updateTimeoutMs,
-      );
-      if (!res.ok) {
-        this.logger.error(
-          `[rfc2136] update failed zone=${zone} name=${desired.name} phase=${res.phase} rcode=${res.rcode ?? 'none'} message=${res.message}`,
-        );
-        this.unhealthyZonesThisCycle.add(zone);
-      }
+      await this.applyWithFailover(zone, {
+        prerequisites: cs.prerequisites,
+        changes: cs.changes,
+        labelForLog: `update name=${desired.name}`,
+      });
     });
   }
 
   async deleteEntry(old: IProviderRecord): Promise<void> {
     if (!this.resolved) return;
+    if (!this.matchesDomainFilter(old.name)) {
+      this.logger.warn(
+        `[rfc2136] entry ${old.name} excluded by RFC2136_DOMAIN_FILTER — skipping delete`,
+      );
+      return;
+    }
     const { zone } = old.providerContext as { zone: string };
     await this.zoneQueue.enqueue(zone, async () => {
       const oldRaw = (old.providerContext as { raw: Rfc2136Record }).raw;
@@ -371,23 +463,92 @@ export class Rfc2136Service implements IDnsProvider {
         this.logger.log(`[rfc2136][dry-run] would delete ${old.name}`);
         return;
       }
+      await this.applyWithFailover(zone, {
+        prerequisites: cs.prerequisites,
+        changes: cs.changes,
+        labelForLog: `delete name=${old.name}`,
+      });
+    });
+  }
+
+  /**
+   * Sends an apply to the pinned DC; on retryable/failover-eligible failures,
+   * walks remaining `availableDcsThisCycle` in order. Only marks the zone
+   * unhealthy after all DCs are exhausted for this single op.
+   *
+   * Mirrors k8s SendMessage (provider/rfc2136/rfc2136.go:546-602).
+   */
+  private async applyWithFailover(
+    zone: string,
+    payload: {
+      prerequisites: ApplyRequest['prerequisites'];
+      changes: ApplyRequest['changes'];
+      labelForLog: string;
+    },
+  ): Promise<void> {
+    const pinned = this.pinnedDcForZone.get(zone);
+    const order: string[] = [];
+    if (pinned) order.push(pinned);
+    // eslint-disable-next-line no-restricted-syntax
+    for (const dc of this.availableDcsThisCycle) {
+      if (!order.includes(dc)) order.push(dc);
+    }
+    if (order.length === 0) {
+      this.logger.error(
+        `[rfc2136] ${payload.labelForLog} zone=${zone} — no DCs available`,
+      );
+      this.unhealthyZonesThisCycle.add(zone);
+      return;
+    }
+
+    let lastFailure: Extract<ApplyResponse, { ok: false }> | undefined;
+    // eslint-disable-next-line no-restricted-syntax
+    for (const dc of order) {
+      // eslint-disable-next-line no-await-in-loop
       const res = await this.transport.apply(
         {
-          host: this.pinnedDcForZone.get(zone)!,
+          host: dc,
           port: this.resolved!.port,
           zone,
-          prerequisites: cs.prerequisites,
-          changes: cs.changes,
+          prerequisites: payload.prerequisites,
+          changes: payload.changes,
         },
         this.resolved!.updateTimeoutMs,
       );
-      if (!res.ok) {
-        this.logger.error(
-          `[rfc2136] delete failed zone=${zone} name=${old.name} phase=${res.phase} rcode=${res.rcode ?? 'none'} message=${res.message}`,
-        );
-        this.unhealthyZonesThisCycle.add(zone);
+      if (res.ok) {
+        if (pinned !== dc) {
+          this.pinnedDcForZone.set(zone, dc);
+          this.logger.log(
+            `[rfc2136] ${payload.labelForLog} zone=${zone} — failed over to dc=${dc}`,
+          );
+        }
+        return;
       }
-    });
+      lastFailure = res;
+      const isFailover =
+        res.retryable === true ||
+        (res.rcode !== undefined && FAILOVER_RCODES.has(res.rcode));
+      this.logger.warn(
+        `[rfc2136] ${payload.labelForLog} zone=${zone} dc=${dc} failed phase=${res.phase} rcode=${res.rcode ?? 'none'} message=${res.message} failover=${isFailover}`,
+      );
+      if (!isFailover) {
+        // Non-retryable, non-failover-eligible — don't try other DCs.
+        break;
+      }
+    }
+
+    this.logger.error(
+      `[rfc2136] ${payload.labelForLog} zone=${zone} — exhausted ${order.length} DC(s) lastPhase=${lastFailure?.phase ?? 'unknown'} lastRcode=${lastFailure?.rcode ?? 'none'} lastMessage=${lastFailure?.message ?? ''}`,
+    );
+    this.unhealthyZonesThisCycle.add(zone);
+  }
+
+  private matchesDomainFilter(fqdn: string): boolean {
+    if (!this.resolved || this.resolved.domainFilter.length === 0) return true;
+    const name = fqdn.toLowerCase().replace(/\.$/, '');
+    return this.resolved.domainFilter.some(
+      (suffix) => name === suffix || name.endsWith(`.${suffix}`),
+    );
   }
 
   private zoneFor(fqdn: string): string | undefined {

@@ -27,7 +27,7 @@ describe('Rfc2136ProviderRecord', () => {
     const r = make({
       name: 'a.example.com',
       type: 'A',
-      ttl: 300,
+      ttl: 3600,
       value: '10.0.0.1',
     });
     const same = Object.assign(new DnsaEntry(), {
@@ -46,7 +46,7 @@ describe('Rfc2136ProviderRecord', () => {
     const r = make({
       name: 'v6.example.com',
       type: 'AAAA',
-      ttl: 300,
+      ttl: 3600,
       value: '2001:db8::1',
     });
     const same = Object.assign(new DnsAaaaEntry(), {
@@ -60,7 +60,7 @@ describe('Rfc2136ProviderRecord', () => {
     const r = make({
       name: 'alias.example.com',
       type: 'CNAME',
-      ttl: 300,
+      ttl: 3600,
       value: 'target.example.com.',
     });
     const same = Object.assign(new DnsCnameEntry(), {
@@ -74,7 +74,7 @@ describe('Rfc2136ProviderRecord', () => {
     const r = make({
       name: 'mail.example.com',
       type: 'MX',
-      ttl: 300,
+      ttl: 3600,
       value: '10 smtp.example.com.',
     });
     const same = Object.assign(new DnsMxEntry(), {
@@ -95,7 +95,7 @@ describe('Rfc2136ProviderRecord', () => {
     const r = make({
       name: 'sub.example.com',
       type: 'NS',
-      ttl: 300,
+      ttl: 3600,
       value: 'ns1.example.com.',
     });
     const same = Object.assign(new DnsNsEntry(), {
@@ -161,6 +161,20 @@ describe('Rfc2136ProviderRecord', () => {
         address: '10.0.0.1',
       });
       expect(r.hasSameValue(desired)).toBe(true);
+    });
+
+    it('returns false when desired omits ttl and raw TTL drifts from defaultTtl', () => {
+      const r = make({
+        name: 'a.example.com',
+        type: 'A',
+        ttl: 60,
+        value: '10.0.0.1',
+      });
+      const desired = Object.assign(new DnsaEntry(), {
+        name: 'a.example.com',
+        address: '10.0.0.1',
+      });
+      expect(r.hasSameValue(desired)).toBe(false);
     });
   });
 });

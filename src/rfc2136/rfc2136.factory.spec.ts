@@ -58,6 +58,24 @@ describe('Rfc2136Factory', () => {
       const cs = factory.buildCreateChangeSet(entry, undefined);
       expect(cs.changes[0].record.ttl).toBe(3600);
     });
+
+    it('omits NXRRSET-TXT prereq and TXT add when skipOwnershipTxtPrereq is true', () => {
+      const entry = Object.assign(new DnsaEntry(), {
+        name: 'app.example.com',
+        address: '10.1.2.3',
+      });
+      const cs = factory.buildCreateChangeSet(entry, 300, {
+        skipOwnershipTxtPrereq: true,
+      });
+      expect(cs.prerequisites).toEqual([
+        { kind: 'NXRRSET', name: 'app.example.com', type: 'A' },
+      ]);
+      expect(cs.changes).toHaveLength(1);
+      expect(cs.changes[0]).toMatchObject({
+        op: 'add',
+        record: { type: 'A', name: 'app.example.com' },
+      });
+    });
   });
 
   describe('buildUpdateChangeSet', () => {

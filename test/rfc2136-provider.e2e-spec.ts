@@ -171,8 +171,68 @@ describe('Rfc2136Service e2e', () => {
     );
   });
 
-  it('serializes same-zone writes — second write aborted after first fails', async () => {
+  it('fails over to DC2 on retryable apply failure; re-pins zone to the new DC', async () => {
+    // Both DCs serve AXFR for zone-a so failover is available.
     mockState.axfrResponses['dc01.corp.example.com|zone-a.example.com'] = {
+      ok: true,
+      records: [],
+    };
+    mockState.axfrResponses['dc02.corp.example.com|zone-a.example.com'] = {
+      ok: true,
+      records: [],
+    };
+    mockState.axfrResponses['dc01.corp.example.com|zone-b.example.com'] = {
+      ok: true,
+      records: [],
+    };
+    await service.prepareForJob();
+    // After prepareForJob, zone-a pins DC1 (first-success-wins). Confirm.
+    expect((service as any).pinnedDcForZone.get('zone-a.example.com')).toBe(
+      'dc01.corp.example.com',
+    );
+
+    mockState.applyResponses = [
+      {
+        ok: false,
+        rcode: 'SERVFAIL',
+        phase: 'dns-receive',
+        message: 'fail',
+        retryable: true,
+      }, // DC1 fails first create
+      { ok: true }, // DC2 succeeds on failover for first create
+      { ok: true }, // DC2 succeeds on second create (zone now pinned to DC2)
+    ];
+
+    const e1 = Object.assign(new DnsaEntry(), {
+      name: 'first.zone-a.example.com',
+      address: '10.0.0.1',
+    });
+    const e2 = Object.assign(new DnsaEntry(), {
+      name: 'second.zone-a.example.com',
+      address: '10.0.0.2',
+    });
+
+    await service.createEntry(e1);
+    await service.createEntry(e2);
+
+    expect(mockState.applyCalls).toHaveLength(3);
+    expect(mockState.applyCalls[0].host).toBe('dc01.corp.example.com');
+    expect(mockState.applyCalls[1].host).toBe('dc02.corp.example.com');
+    expect(mockState.applyCalls[2].host).toBe('dc02.corp.example.com');
+    expect(
+      (service as any).unhealthyZonesThisCycle.has('zone-a.example.com'),
+    ).toBe(false);
+    expect((service as any).pinnedDcForZone.get('zone-a.example.com')).toBe(
+      'dc02.corp.example.com',
+    );
+  });
+
+  it('marks zone unhealthy only after ALL DCs exhausted; gates subsequent same-zone writes', async () => {
+    mockState.axfrResponses['dc01.corp.example.com|zone-a.example.com'] = {
+      ok: true,
+      records: [],
+    };
+    mockState.axfrResponses['dc02.corp.example.com|zone-a.example.com'] = {
       ok: true,
       records: [],
     };
@@ -187,11 +247,18 @@ describe('Rfc2136Service e2e', () => {
         ok: false,
         rcode: 'SERVFAIL',
         phase: 'dns-receive',
-        message: 'fail',
+        message: 'dc1 fail',
         retryable: true,
       },
-      // The second response must never be consumed; the gate blocks the
-      // second create after the first one marks zone-a unhealthy.
+      {
+        ok: false,
+        rcode: 'SERVFAIL',
+        phase: 'dns-receive',
+        message: 'dc2 fail',
+        retryable: true,
+      },
+      // Third response must never be consumed — zone is now unhealthy, second
+      // create is gated out by the ZoneQueue.
       { ok: true },
     ];
 
@@ -204,16 +271,21 @@ describe('Rfc2136Service e2e', () => {
       address: '10.0.0.2',
     });
 
-    await Promise.all([service.createEntry(e1), service.createEntry(e2)]);
+    await service.createEntry(e1);
+    await service.createEntry(e2);
 
-    expect(mockState.applyCalls).toHaveLength(1);
+    expect(mockState.applyCalls).toHaveLength(2);
     expect(
       (service as any).unhealthyZonesThisCycle.has('zone-a.example.com'),
     ).toBe(true);
   });
 
-  it('does not block writes to a healthy zone when another zone is unhealthy', async () => {
+  it('isolated zone health: a fully-failed zone does not block writes to another zone', async () => {
     mockState.axfrResponses['dc01.corp.example.com|zone-a.example.com'] = {
+      ok: true,
+      records: [],
+    };
+    mockState.axfrResponses['dc02.corp.example.com|zone-a.example.com'] = {
       ok: true,
       records: [],
     };
@@ -224,14 +296,23 @@ describe('Rfc2136Service e2e', () => {
     await service.prepareForJob();
 
     mockState.applyResponses = [
+      // zone-a both DCs fail
       {
         ok: false,
         rcode: 'SERVFAIL',
         phase: 'dns-receive',
-        message: 'fail',
+        message: 'dc1',
         retryable: true,
-      }, // zone-a fail
-      { ok: true }, // zone-b success
+      },
+      {
+        ok: false,
+        rcode: 'SERVFAIL',
+        phase: 'dns-receive',
+        message: 'dc2',
+        retryable: true,
+      },
+      // zone-b first DC succeeds
+      { ok: true },
     ];
 
     const eA = Object.assign(new DnsaEntry(), {
@@ -242,9 +323,17 @@ describe('Rfc2136Service e2e', () => {
       name: 'y.zone-b.example.com',
       address: '10.0.0.2',
     });
-    await Promise.all([service.createEntry(eA), service.createEntry(eB)]);
+    // Sequential to keep mock-response order deterministic.
+    await service.createEntry(eA);
+    await service.createEntry(eB);
 
-    expect(mockState.applyCalls).toHaveLength(2);
+    expect(mockState.applyCalls).toHaveLength(3);
+    expect(
+      (service as any).unhealthyZonesThisCycle.has('zone-a.example.com'),
+    ).toBe(true);
+    expect(
+      (service as any).unhealthyZonesThisCycle.has('zone-b.example.com'),
+    ).toBe(false);
   });
 
   it('returns owned records via getRecords and excludes ownership TXTs', async () => {

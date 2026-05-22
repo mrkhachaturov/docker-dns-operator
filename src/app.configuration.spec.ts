@@ -502,6 +502,8 @@ describe('App Configuration', () => {
       'RFC2136_UPDATE_TIMEOUT_SECONDS',
       'RFC2136_CIRCUIT_BREAKER_THRESHOLD',
       'RFC2136_DRY_RUN',
+      'RFC2136_TAXFR',
+      'RFC2136_DOMAIN_FILTER',
     ];
 
     beforeEach(() => {
@@ -570,11 +572,18 @@ describe('App Configuration', () => {
       await expect(getSystemUnderTest()).rejects.toThrow(/does not match/);
     });
 
-    it('rejects IP address in RFC2136_HOSTS', async () => {
+    it('rejects IP address in RFC2136_HOSTS with FQDN-required error', async () => {
       setValidRfc2136Env();
       process.env.RFC2136_HOSTS = '10.0.0.1';
 
-      await expect(getSystemUnderTest()).rejects.toThrow();
+      await expect(getSystemUnderTest()).rejects.toThrow(/FQDN/);
+    });
+
+    it('rejects bare hostname (no dot) in RFC2136_HOSTS', async () => {
+      setValidRfc2136Env();
+      process.env.RFC2136_HOSTS = 'dc01';
+
+      await expect(getSystemUnderTest()).rejects.toThrow(/FQDN/);
     });
 
     it('rejects unsupported auth mode', async () => {
