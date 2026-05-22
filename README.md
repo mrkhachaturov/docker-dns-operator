@@ -3,8 +3,6 @@
 > 🐳 Declarative DNS for Docker. Annotate a container or Swarm service with a JSON label and the operator reconciles those records into CloudFlare, MikroTik RouterOS, and/or Active Directory DNS on every tick.
 
 [![Docker Hub](https://img.shields.io/docker/v/mrkhachaturov/docker-dns-operator?label=docker&sort=semver)](https://hub.docker.com/r/mrkhachaturov/docker-dns-operator)
-![Providers](https://img.shields.io/badge/providers-CloudFlare%20%7C%20MikroTik%20%7C%20RFC2136-0f766e)
-![Records](https://img.shields.io/badge/records-A%20%7C%20AAAA%20%7C%20CNAME%20%7C%20MX%20%7C%20NS-1d4ed8)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 | | Scope | Meaning |
@@ -445,23 +443,9 @@ services:
 
 ## 🛠️ Operations
 
-### 🐳 Image tags
-
-Published on Docker Hub as [`mrkhachaturov/docker-dns-operator`](https://hub.docker.com/r/mrkhachaturov/docker-dns-operator).
-
-| | Tag | Meaning |
-|---|---|---|
-| 🟢 | `latest` | Most recent release across all major versions. |
-| 🔵 | `<major>-latest` | Most recent release of that major version, e.g. `1-latest`. |
-| 🟣 | `<semver>` | Specific release, e.g. `1.0.0`. |
-| 🟠 | `<semver>-<pre>` | Pre-release builds, e.g. `1.1.0-alpha`. |
-
 ### 📝 Logging
 
-`LOG_LEVEL` maps to the NestJS logger. Order from most-specific to least: `fatal` → `error` → `warn` → `log` → `debug` → `verbose`. Each level includes everything above. Production deployments typically run at `warn` or `error`.
-
-> [!CAUTION]
-> An invalid `LOG_LEVEL` makes the process hang at startup with no output. If startup hangs silently, check the log level first.
+`LOG_LEVEL` maps to the NestJS logger. Order from most-specific to least: `fatal` → `error` → `warn` → `log` → `debug` → `verbose`. Each level includes everything above. Production deployments typically run at `warn` or `error`. Invalid values are rejected at startup with a clear validation error.
 
 ### 🩺 Health
 
@@ -471,7 +455,6 @@ The main operator does not currently expose an HTTP health endpoint. The rfc2136
 
 - 🏢 The rfc2136 provider is all-or-nothing. Every required variable must be set, or the provider is silently not registered and entries routed to `rfc2136` are dropped with a warning.
 - 6️⃣ AAAA records on CloudFlare or MikroTik throw at runtime. Route AAAA only to `rfc2136`.
-- 🧭 An invalid `LOG_LEVEL` hangs startup with no output.
 
 ---
 
