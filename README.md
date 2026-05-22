@@ -143,12 +143,15 @@ graph LR
     style HC fill:#10b981,color:#fff,stroke:#10b981
 ```
 
-The Kerberos/TSIG protocol layer runs in a separate Go sidecar (`ddo-rfc2136`). The sidecar runs `kinit -kt` against a keytab on startup, refreshes the TGT every `RFC2136_KINIT_REFRESH_INTERVAL`, signs UPDATE and AXFR with GSS-TSIG, and exposes `/healthz` (HTTP 503 with `{"kerberos":"expired"}` on refresh failure).
+The Kerberos/TSIG protocol layer runs in a separate Go webhook sidecar that lives in its own repo at [mrkhachaturov/ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) and is attached here as a git submodule under [sidecars/ddo-rfc2136/](sidecars/ddo-rfc2136/). The sidecar runs `kinit -kt` against a keytab on startup, refreshes the TGT every `RFC2136_KINIT_REFRESH_INTERVAL`, signs UPDATE and AXFR with GSS-TSIG, and exposes `/healthz` (HTTP 503 with `{"kerberos":"expired"}` on refresh failure).
 
 The operator implements failover across multiple DCs (`RFC2136_HOSTS`) with a per-DC circuit breaker, per-zone DC pinning, and an AXFR-disabled mode (`RFC2136_AXFR_ENABLED=false`) for environments where zone transfers are denied.
 
 > [!CAUTION]
 > `RFC2136_HOSTS` must contain real DNS hostnames of your DCs. IPs and bare hostnames are rejected at startup. AD's Kerberos service principal is bound to the host you contact; an IP or short name produces `KDC_ERR_S_PRINCIPAL_UNKNOWN` or `KDC_ERR_WRONG_REALM` on every cycle.
+
+> [!NOTE]
+> **Webhook-sidecar convention.** Aligns with [k8s external-dns webhook providers](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/webhook-provider.md): each provider that needs out-of-process work runs its own sidecar, scoped by `<PROVIDER>_WEBHOOK_URL`. Future sidecars follow the same pattern — add `sidecars/<name>/` (submodule) and a `<PROVIDER>_WEBHOOK_URL` env var.
 
 See [docs/rfc2136-integration-runbook.md](docs/rfc2136-integration-runbook.md) for keytab generation, AD permission setup, and the full deployment walkthrough.
 
@@ -499,7 +502,7 @@ yarn test:e2e           # 🐳 e2e (uses testcontainers, Docker required)
 
 Adding a new provider means implementing the `DnsProvider` interface in [src/providers/dns-provider.interface.ts](src/providers/dns-provider.interface.ts), registering it in [provider-registry.service.ts](src/providers/provider-registry.service.ts), wiring config in [app.configuration.ts](src/app.configuration.ts), and updating [app.module.ts](src/app.module.ts). Unit specs live next to the code; e2e specs live under `test/`.
 
-The rfc2136 sidecar lives in [ddo-rfc2136/](ddo-rfc2136/) as a separate Go module with its own build and tests.
+The rfc2136 webhook sidecar lives in its own repo [mrkhachaturov/ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) and is attached here as a git submodule at [sidecars/ddo-rfc2136/](sidecars/ddo-rfc2136/). After cloning, run `git submodule update --init --recursive` to fetch the sidecar source. To bump the pinned sidecar commit: `git -C sidecars/ddo-rfc2136 checkout <ref>` then commit the submodule pointer in this repo.
 
 Conventions and architecture notes for AI assistants are in [CLAUDE.md](CLAUDE.md).
 
