@@ -1,0 +1,63 @@
+# Example: MikroTik in Docker Swarm mode.
+#
+# Differs from the standalone examples/mikrotik/ in three ways:
+#   1. The operator auto-detects swarm mode via `docker info` (LocalNodeState
+#      + ControlAvailable) when it lands on a manager node, and switches to
+#      listing services instead of containers. No env toggle to set.
+#   2. The "target" service declares labels under `deploy.labels:` (service
+#      spec), not the top-level `labels:` (container spec).
+#   3. Deployed with `docker stack deploy`, not `docker compose up`.
+#
+# How to run:
+#   docker swarm init                           # if not already a swarm node
+#   cp .env.example .env
+#   $EDITOR .env
+#   set -a; source .env; set +a                 # export vars for stack deploy
+#   docker stack deploy -c docker-stack.yml ddo-mt
+#
+# Tear down:
+#   docker stack rm ddo-mt
+#
+# Notes:
+#   - `docker stack deploy` does NOT auto-load .env. We export the vars first.
+#   - `image:` only — no `build:` (swarm pulls images, doesn't build).
+#   - `depends_on` is silently ignored by swarm — services come up in parallel,
+#     the operator just no-ops cycles until the target's labels show up.
+
+services:
+  docker-dns-operator:
+    image: mrkhachaturov/docker-dns-operator:dev
+    environment:
+      LOG_LEVEL: debug
+      PROJECT_LABEL: docker-dns-operator
+      INSTANCE_ID: mikrotik-swarm-example
+      EXECUTION_FREQUENCY_SECONDS: "30"
+      MIKROTIK_BASEURL: ${MIKROTIK_BASEURL:?set MIKROTIK_BASEURL in .env}
+      MIKROTIK_USERNAME: ${MIKROTIK_USERNAME:?set MIKROTIK_USERNAME in .env}
+      MIKROTIK_PASSWORD: ${MIKROTIK_PASSWORD:?set MIKROTIK_PASSWORD in .env}
+      MIKROTIK_SKIP_TLS_VERIFY: ${MIKROTIK_SKIP_TLS_VERIFY:-true}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      placement:
+        # Swarm-mode requires manager access — operator must run on a manager.
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  target:
+    image: busybox:latest
+    command: sleep 3600
+    deploy:
+      labels:
+        docker-dns-operator:mikrotik-swarm-example: |
+          [
+            { "type": "A",
+              "name": "${TEST_RECORD_NAME:?set TEST_RECORD_NAME in .env}",
+              "address": "${TEST_RECORD_VALUE:?set TEST_RECORD_VALUE in .env}",
+              "providers": ["mikrotik"] }
+          ]
+      replicas: 1
+      restart_policy:
+        condition: on-failure

@@ -1,0 +1,23 @@
+[libdefaults]
+    default_realm = CORP.EXAMPLE.COM
+    dns_lookup_realm = false
+    dns_lookup_kdc = false
+    ticket_lifetime = 24h
+    renew_lifetime = 7d
+    forwardable = true
+    rdns = false
+    default_tkt_enctypes = aes256-cts-hmac-sha1-96
+    default_tgs_enctypes = aes256-cts-hmac-sha1-96
+    permitted_enctypes = aes256-cts-hmac-sha1-96
+
+[realms]
+    CORP.EXAMPLE.COM = {
+        kdc = dc01.corp.example.com
+        kdc = dc02.corp.example.com
+        admin_server = dc01.corp.example.com
+        default_domain = corp.example.com
+    }
+
+[domain_realm]
+    .corp.example.com = CORP.EXAMPLE.COM
+    corp.example.com = CORP.EXAMPLE.COM

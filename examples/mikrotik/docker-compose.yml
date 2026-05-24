@@ -1,0 +1,42 @@
+# Example: MikroTik-only DNS sync.
+#
+# How to run:
+#   1. cp .env.example .env
+#   2. edit .env and fill in MIKROTIK_* + TEST_RECORD_* values
+#   3. docker compose up --build
+#
+# Verify:
+#   dig @${MIKROTIK_DNS_IP} ${TEST_RECORD_NAME}    # see README for MIKROTIK_DNS_IP
+#
+# MikroTik has no notion of "zones" — it accepts any name into /ip/dns/static.
+# The operator tags every record it owns with comment
+# `docker-dns-operator:mikrotik-example`, so your existing static DNS is
+# untouched.
+
+services:
+  docker-dns-operator:
+    image: mrkhachaturov/docker-dns-operator:dev
+    build: ../..
+    environment:
+      LOG_LEVEL: debug
+      PROJECT_LABEL: docker-dns-operator
+      INSTANCE_ID: mikrotik-example
+      EXECUTION_FREQUENCY_SECONDS: 30
+      MIKROTIK_BASEURL: ${MIKROTIK_BASEURL:?set MIKROTIK_BASEURL in .env}
+      MIKROTIK_USERNAME: ${MIKROTIK_USERNAME:?set MIKROTIK_USERNAME in .env}
+      MIKROTIK_PASSWORD: ${MIKROTIK_PASSWORD:?set MIKROTIK_PASSWORD in .env}
+      MIKROTIK_SKIP_TLS_VERIFY: ${MIKROTIK_SKIP_TLS_VERIFY:-true}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  target:
+    image: busybox:latest
+    command: sleep 3600
+    labels:
+      docker-dns-operator:mikrotik-example: |
+        [
+          { "type": "A",
+            "name": "${TEST_RECORD_NAME:?set TEST_RECORD_NAME in .env}",
+            "address": "${TEST_RECORD_VALUE:?set TEST_RECORD_VALUE in .env}",
+            "providers": ["mikrotik"] }
+        ]

@@ -1,0 +1,39 @@
+# Example: Cloudflare-only DNS sync.
+#
+# How to run:
+#   1. cp .env.example .env
+#   2. edit .env and fill in CF_API_TOKEN + TEST_RECORD_* values
+#   3. docker compose up --build
+#
+# Verify:
+#   dig @1.1.1.1 ${TEST_RECORD_NAME}     # should return TEST_RECORD_VALUE
+#
+# The operator only manages records tagged with PROJECT_LABEL:INSTANCE_ID
+# (here `docker-dns-operator:cloudflare-example`). Unrelated Cloudflare
+# records in the zone are never touched.
+
+services:
+  docker-dns-operator:
+    image: mrkhachaturov/docker-dns-operator:dev
+    build: ../..
+    environment:
+      LOG_LEVEL: debug
+      PROJECT_LABEL: docker-dns-operator
+      INSTANCE_ID: cloudflare-example
+      EXECUTION_FREQUENCY_SECONDS: 30
+      API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  target:
+    image: busybox:latest
+    command: sleep 3600
+    labels:
+      docker-dns-operator:cloudflare-example: |
+        [
+          { "type": "A",
+            "name": "${TEST_RECORD_NAME:?set TEST_RECORD_NAME in .env}",
+            "address": "${TEST_RECORD_VALUE:?set TEST_RECORD_VALUE in .env}",
+            "providers": ["cf"],
+            "providerOptions": { "cf": { "proxy": false } } }
+        ]

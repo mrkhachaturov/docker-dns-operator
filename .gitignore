@@ -116,9 +116,14 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
-# docker compose
-docker-compose*.yml
-docker-compose*.yaml
+# docker compose — committed: docker-compose.yml, examples/*/docker-compose.yml
+# Gitignored: any .override.yml (local secrets) and *.local.yml (per-operator tweaks)
+docker-compose.override.yml
+docker-compose.override.yaml
+docker-compose.*.override.yml
+docker-compose.*.override.yaml
+docker-compose.local.yml
+docker-compose.*.local.yml
 
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
@@ -138,6 +143,11 @@ CLAUDE.local.md
 # rfc2136 integration test artifacts (env-specific, secrets)
 test/keytab/
 test/krb5.conf
+
+# Operator-specific Kerberos config (only krb5.conf.example is committed)
+examples/rfc2136/krb5.conf
+examples/rfc2136/secrets/
+examples/rfc2136/keytab/
 
 # Claude Code local state
 .claude/
