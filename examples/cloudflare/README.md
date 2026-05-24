@@ -28,6 +28,27 @@ docker compose down
 
 The record is removed automatically because the busybox container is gone.
 
+## Swarm mode
+
+The same setup works on a Docker Swarm manager — labels live under
+`deploy.labels:` (service spec) and the operator auto-detects swarm via
+`docker info`. Swarm doesn't build images, so build them first.
+
+```bash
+docker swarm init                                   # if not already a swarm node
+cp .env.example .env
+$EDITOR .env
+docker compose -f docker-compose.yml build          # produces both :dev images locally
+set -a; source .env; set +a                         # `docker stack deploy` doesn't read .env
+docker stack deploy -c docker-stack.yml ddo-cf
+```
+
+Tear down:
+
+```bash
+docker stack rm ddo-cf
+```
+
 ## How it works
 
 The busybox container carries a label:

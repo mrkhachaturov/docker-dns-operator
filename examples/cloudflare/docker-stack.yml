@@ -1,0 +1,61 @@
+# Example: Cloudflare DNS via the ddo-cloudflare sidecar — Swarm mode.
+#
+# Same outcome as docker-compose.yml in this folder, but deployed via
+# `docker stack deploy`. The operator runs on a manager and reads
+# service-level labels via listServices (auto-detected from `docker info`).
+#
+# Run:
+#   set -a; source .env; set +a
+#   docker compose -f docker-compose.yml build       # swarm pulls; build first
+#   docker stack deploy -c docker-stack.yml ddo-cf
+#
+# Tear down:
+#   docker stack rm ddo-cf
+
+services:
+  docker-dns-operator:
+    image: mrkhachaturov/docker-dns-operator:dev
+    environment:
+      LOG_LEVEL: debug
+      PROJECT_LABEL: docker-dns-operator
+      INSTANCE_ID: cloudflare-swarm-example
+      EXECUTION_FREQUENCY_SECONDS: "30"
+      WEBHOOK_CF_URL: http://ddo-cloudflare:9090
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      placement:
+        # Swarm-mode requires manager access — operator must run on a manager.
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  ddo-cloudflare:
+    image: ddo-cloudflare:dev
+    environment:
+      WEBHOOK_LISTEN: ":9090"
+      CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+      CLOUDFLARE_ZONES: ${CF_ZONES:-}
+      CLOUDFLARE_DEFAULT_TTL: ${CF_DEFAULT_TTL:-1}
+      CLOUDFLARE_PROXIED_DEFAULT: ${CF_PROXIED_DEFAULT:-false}
+    deploy:
+      restart_policy:
+        condition: on-failure
+
+  target:
+    image: busybox:latest
+    command: sleep 3600
+    deploy:
+      labels:
+        docker-dns-operator:cloudflare-swarm-example: |
+          [
+            { "type": "A",
+              "name": "${TEST_RECORD_NAME:?set TEST_RECORD_NAME in .env}",
+              "address": "${TEST_RECORD_VALUE:?set TEST_RECORD_VALUE in .env}",
+              "providers": ["cf"],
+              "providerOptions": { "cf": { "proxy": false } } }
+          ]
+      replicas: 1
+      restart_policy:
+        condition: on-failure
