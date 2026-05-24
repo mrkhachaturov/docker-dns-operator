@@ -5,7 +5,12 @@ import { DnsCnameEntry } from '../dto/dnscname-entry';
 import { DnsMxEntry } from '../dto/dnsmx-entry';
 import { DnsNsEntry } from '../dto/dnsns-entry';
 import { DNSTypes } from '../dto/dnsbase-entry';
-import { OWNER_LABEL_KEY, dnsEntryToEndpoint } from './endpoint-mapping';
+import {
+  CLOUDFLARE_PROXIED_KEY,
+  OWNER_LABEL_KEY,
+  cfProxiedFromEndpoint,
+  dnsEntryToEndpoint,
+} from './endpoint-mapping';
 
 const ownership = 'docker-dns-operator:home';
 
@@ -104,5 +109,97 @@ describe('dnsEntryToEndpoint', () => {
     expect(() => dnsEntryToEndpoint(entry, ownership)).toThrow(
       /unsupported DNS type/i,
     );
+  });
+
+  describe('cloudflare-proxied providerSpecific round-trip', () => {
+    it('emits providerSpecific=true when cf.proxy=true on an A entry', () => {
+      const entry = plainToInstance(DnsaEntry, {
+        type: DNSTypes.A,
+        name: 'app.example.com',
+        address: '10.1.2.3',
+        providerOptions: { cf: { proxy: true } },
+      });
+
+      const ep = dnsEntryToEndpoint(entry, ownership);
+
+      expect(ep.providerSpecific).toEqual([
+        { name: CLOUDFLARE_PROXIED_KEY, value: 'true' },
+      ]);
+    });
+
+    it('emits providerSpecific=false when cf.proxy=false on a CNAME entry', () => {
+      const entry = plainToInstance(DnsCnameEntry, {
+        type: DNSTypes.CNAME,
+        name: 'www.example.com',
+        target: 'app.example.com',
+        providerOptions: { cf: { proxy: false } },
+      });
+
+      const ep = dnsEntryToEndpoint(entry, ownership);
+
+      expect(ep.providerSpecific).toEqual([
+        { name: CLOUDFLARE_PROXIED_KEY, value: 'false' },
+      ]);
+    });
+
+    it('omits providerSpecific when cf.proxy is unset', () => {
+      const entry = plainToInstance(DnsaEntry, {
+        type: DNSTypes.A,
+        name: 'app.example.com',
+        address: '10.1.2.3',
+      });
+
+      const ep = dnsEntryToEndpoint(entry, ownership);
+
+      expect(ep.providerSpecific).toBeUndefined();
+    });
+
+    it('omits providerSpecific on MX records even with cf.proxy set', () => {
+      const entry = plainToInstance(DnsMxEntry, {
+        type: DNSTypes.MX,
+        name: 'example.com',
+        server: 'mail.example.com',
+        priority: 10,
+        providerOptions: { cf: { proxy: true } },
+      });
+
+      const ep = dnsEntryToEndpoint(entry, ownership);
+
+      expect(ep.providerSpecific).toBeUndefined();
+    });
+  });
+});
+
+describe('cfProxiedFromEndpoint', () => {
+  it('parses "true" to boolean true', () => {
+    expect(
+      cfProxiedFromEndpoint({
+        dnsName: 'x',
+        recordType: 'A',
+        targets: ['1.2.3.4'],
+        providerSpecific: [{ name: CLOUDFLARE_PROXIED_KEY, value: 'true' }],
+      }),
+    ).toBe(true);
+  });
+
+  it('parses "false" to boolean false', () => {
+    expect(
+      cfProxiedFromEndpoint({
+        dnsName: 'x',
+        recordType: 'A',
+        targets: ['1.2.3.4'],
+        providerSpecific: [{ name: CLOUDFLARE_PROXIED_KEY, value: 'false' }],
+      }),
+    ).toBe(false);
+  });
+
+  it('returns undefined when the property is absent', () => {
+    expect(
+      cfProxiedFromEndpoint({
+        dnsName: 'x',
+        recordType: 'A',
+        targets: ['1.2.3.4'],
+      }),
+    ).toBeUndefined();
   });
 });

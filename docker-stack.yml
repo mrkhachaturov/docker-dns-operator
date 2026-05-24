@@ -27,7 +27,7 @@ services:
       PROJECT_LABEL: docker-dns-operator
       INSTANCE_ID: full-example-swarm
       EXECUTION_FREQUENCY_SECONDS: "30"
-      API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+      WEBHOOK_CF_URL: http://ddo-cloudflare:9090
       WEBHOOK_MIKROTIK_URL: http://ddo-mikrotik:9090
       WEBHOOK_RFC2136_URL: http://ddo-rfc2136:9090
     volumes:
@@ -36,6 +36,18 @@ services:
       placement:
         constraints:
           - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  ddo-cloudflare:
+    image: ddo-cloudflare:dev
+    environment:
+      WEBHOOK_LISTEN: ":9090"
+      CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+      CLOUDFLARE_ZONES: ${CF_ZONES:-}
+      CLOUDFLARE_DEFAULT_TTL: ${CF_DEFAULT_TTL:-1}
+      CLOUDFLARE_PROXIED_DEFAULT: ${CF_PROXIED_DEFAULT:-false}
+    deploy:
       restart_policy:
         condition: on-failure
 

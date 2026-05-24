@@ -4,13 +4,33 @@ import { DnsAaaaEntry, isDnsAaaaEntry } from '../dto/dnsaaaa-entry';
 import { DnsCnameEntry, isDnsCnameEntry } from '../dto/dnscname-entry';
 import { DnsMxEntry, isDnsMxEntry } from '../dto/dnsmx-entry';
 import { DnsNsEntry, isDnsNsEntry } from '../dto/dnsns-entry';
-import { Endpoint } from './types';
+import { Endpoint, ProviderSpecificProperty } from './types';
 
 /**
  * Label key on Endpoint used to tag records with the operator instance
  * that owns them. Matches the external-dns convention (OwnerLabelKey).
  */
 export const OWNER_LABEL_KEY = 'owner';
+
+/**
+ * Provider-specific property name used to round-trip the Cloudflare
+ * orange-cloud proxy toggle. Matches the upstream external-dns Cloudflare
+ * provider convention so the wire format stays interoperable.
+ */
+export const CLOUDFLARE_PROXIED_KEY =
+  'external-dns.alpha.kubernetes.io/cloudflare-proxied';
+
+function cfProxiedSpecificFromEntry(
+  entry: DnsbaseEntry,
+): ProviderSpecificProperty | undefined {
+  if (!isDnsAEntry(entry) && !isDnsCnameEntry(entry)) return undefined;
+  const proxy = entry.providerOptions?.cf?.proxy;
+  if (proxy === undefined) return undefined;
+  return {
+    name: CLOUDFLARE_PROXIED_KEY,
+    value: proxy ? 'true' : 'false',
+  };
+}
 
 /**
  * Convert a DnsbaseEntry (operator-side DTO) into an Endpoint (wire form).
@@ -22,6 +42,11 @@ export const OWNER_LABEL_KEY = 'owner';
  * The ownership label is always stamped onto labels[owner] so a sidecar
  * that round-trips labels can let the operator filter its own records
  * from getRecords output (see webhook-provider.ts).
+ *
+ * Cloudflare's proxy toggle (`providerOptions.cf.proxy`) is emitted as a
+ * providerSpecific entry on A/CNAME records so the ddo-cloudflare sidecar
+ * can apply it. Other sidecars ignore providerSpecific properties they
+ * don't recognise.
  */
 export function dnsEntryToEndpoint(
   entry: DnsbaseEntry,
@@ -32,11 +57,14 @@ export function dnsEntryToEndpoint(
     labels: { [OWNER_LABEL_KEY]: ownershipLabel },
   };
 
+  const cfProxiedSpecific = cfProxiedSpecificFromEntry(entry);
+
   if (isDnsAEntry(entry)) {
     return {
       ...base,
       recordType: 'A',
       targets: [(entry as DnsaEntry).address],
+      ...(cfProxiedSpecific && { providerSpecific: [cfProxiedSpecific] }),
     };
   }
   if (isDnsAaaaEntry(entry)) {
@@ -51,6 +79,7 @@ export function dnsEntryToEndpoint(
       ...base,
       recordType: 'CNAME',
       targets: [(entry as DnsCnameEntry).target],
+      ...(cfProxiedSpecific && { providerSpecific: [cfProxiedSpecific] }),
     };
   }
   if (isDnsMxEntry(entry)) {
@@ -92,4 +121,20 @@ export function wireTypeToDnsType(recordType: string): DNSTypes {
     default:
       return DNSTypes.Unsupported;
   }
+}
+
+/**
+ * Reads the cloudflare-proxied providerSpecific property from an Endpoint
+ * and returns its boolean form. Returns `undefined` when absent or when
+ * the value can't be parsed — callers treat undefined as "no opinion".
+ */
+export function cfProxiedFromEndpoint(ep: Endpoint): boolean | undefined {
+  if (!ep.providerSpecific) return undefined;
+  const entry = ep.providerSpecific.find(
+    (p) => p.name === CLOUDFLARE_PROXIED_KEY,
+  );
+  if (!entry) return undefined;
+  if (entry.value === 'true') return true;
+  if (entry.value === 'false') return false;
+  return undefined;
 }

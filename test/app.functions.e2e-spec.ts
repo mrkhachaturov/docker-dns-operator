@@ -1,39 +1,24 @@
 import { validDnsCnameEntry } from '../src/dto/dnscname-entry.spec';
 import { validDnsMxEntry } from '../src/dto/dnsmx-entry.spec';
 import { validDnsNsEntry } from '../src/dto/dnsns-entry.spec';
-import { DnsCnameEntry, isDnsCnameEntry } from '../src/dto/dnscname-entry';
-import { DnsMxEntry, isDnsMxEntry } from '../src/dto/dnsmx-entry';
-import { DnsNsEntry, isDnsNsEntry } from '../src/dto/dnsns-entry';
+import { DnsCnameEntry } from '../src/dto/dnscname-entry';
+import { DnsMxEntry } from '../src/dto/dnsmx-entry';
+import { DnsNsEntry } from '../src/dto/dnsns-entry';
 import { validDnsAEntry } from '../src/dto/dnsa-entry.spec';
-import { DnsaEntry, isDnsAEntry } from '../src/dto/dnsa-entry';
+import { DnsaEntry } from '../src/dto/dnsa-entry';
 import { DnsbaseEntry } from '../src/dto/dnsbase-entry';
-import { CloudflareProviderRecord } from '../src/cloud-flare/cloudflare-provider-record';
+import { WebhookProviderRecord } from '../src/webhook-provider/webhook-provider-record';
+import { dnsEntryToEndpoint } from '../src/webhook-provider/endpoint-mapping';
 import { computeSetDifference } from '../src/app.functions';
 
-/** Build a CloudflareProviderRecord from a DnsbaseEntry for test purposes. */
-function toCFRecord(
-  entry: DnsbaseEntry,
-  zoneId = 'zone-1',
-  id = 'test-id',
-): CloudflareProviderRecord {
-  const r = new CloudflareProviderRecord();
-  r.id = id;
-  r.name = entry.name;
-  r.type = entry.type;
-  r.zoneId = zoneId;
-  if (isDnsAEntry(entry)) {
-    r.address = entry.address;
-    r.proxy = entry.providerOptions?.cf?.proxy ?? false;
-  } else if (isDnsCnameEntry(entry)) {
-    r.target = entry.target;
-    r.proxy = entry.providerOptions?.cf?.proxy ?? false;
-  } else if (isDnsMxEntry(entry)) {
-    r.server = entry.server;
-    r.priority = entry.priority;
-  } else if (isDnsNsEntry(entry)) {
-    r.server = entry.server;
-  }
-  return r;
+/**
+ * Build a WebhookProviderRecord from a DnsbaseEntry for test purposes.
+ * Uses the generic webhook contract — same shape any sidecar emits.
+ */
+function toWebhookRecord(entry: DnsbaseEntry): WebhookProviderRecord {
+  return new WebhookProviderRecord(
+    dnsEntryToEndpoint(entry, 'docker-dns-operator:1'),
+  );
 }
 
 describe('AppFunctions (Integration)', () => {
@@ -63,27 +48,13 @@ describe('AppFunctions (Integration)', () => {
         }),
       ];
 
-      const toUpdateCloudFlare = [
-        toCFRecord(
-          validDnsAEntry(DnsaEntry, { name: 'to-update' }),
-          'zone-1',
-          'to-update-id',
-        ),
-        toCFRecord(
+      const toUpdateWebhook = [
+        toWebhookRecord(validDnsAEntry(DnsaEntry, { name: 'to-update' })),
+        toWebhookRecord(
           validDnsCnameEntry(DnsCnameEntry, { name: 'to-update' }),
-          'zone-1',
-          'to-update-id',
         ),
-        toCFRecord(
-          validDnsMxEntry(DnsMxEntry, { name: 'to-update' }),
-          'zone-1',
-          'to-update-id',
-        ),
-        toCFRecord(
-          validDnsNsEntry(DnsNsEntry, { name: 'to-update' }),
-          'zone-1',
-          'to-update-id',
-        ),
+        toWebhookRecord(validDnsMxEntry(DnsMxEntry, { name: 'to-update' })),
+        toWebhookRecord(validDnsNsEntry(DnsNsEntry, { name: 'to-update' })),
       ];
 
       const unchangedDocker = [
@@ -93,36 +64,34 @@ describe('AppFunctions (Integration)', () => {
         validDnsNsEntry(DnsNsEntry, { name: 'unchanged' }),
       ];
 
-      const unchangedCloudFlare = [
-        toCFRecord(validDnsAEntry(DnsaEntry, { name: 'unchanged' })),
-        toCFRecord(validDnsCnameEntry(DnsCnameEntry, { name: 'unchanged' })),
-        toCFRecord(validDnsMxEntry(DnsMxEntry, { name: 'unchanged' })),
-        toCFRecord(validDnsNsEntry(DnsNsEntry, { name: 'unchanged' })),
+      const unchangedWebhook = [
+        toWebhookRecord(validDnsAEntry(DnsaEntry, { name: 'unchanged' })),
+        toWebhookRecord(
+          validDnsCnameEntry(DnsCnameEntry, { name: 'unchanged' }),
+        ),
+        toWebhookRecord(validDnsMxEntry(DnsMxEntry, { name: 'unchanged' })),
+        toWebhookRecord(validDnsNsEntry(DnsNsEntry, { name: 'unchanged' })),
       ];
 
       const toDelete = [
-        toCFRecord(
-          validDnsAEntry(DnsaEntry, { name: 'to-delete' }),
-          'zone-1',
-          'to-delete-id',
-        ),
+        toWebhookRecord(validDnsAEntry(DnsaEntry, { name: 'to-delete' })),
       ];
 
       // act / assert
       expect(
         computeSetDifference(
           [...toAdd, ...toUpdateDocker, ...unchangedDocker],
-          [...toUpdateCloudFlare, ...unchangedCloudFlare, ...toDelete],
+          [...toUpdateWebhook, ...unchangedWebhook, ...toDelete],
         ),
       ).toEqual({
-        unchanged: unchangedCloudFlare,
+        unchanged: unchangedWebhook,
         add: toAdd,
         delete: toDelete,
         update: [
-          { old: toUpdateCloudFlare[0], update: toUpdateDocker[0] },
-          { old: toUpdateCloudFlare[1], update: toUpdateDocker[1] },
-          { old: toUpdateCloudFlare[2], update: toUpdateDocker[2] },
-          { old: toUpdateCloudFlare[3], update: toUpdateDocker[3] },
+          { old: toUpdateWebhook[0], update: toUpdateDocker[0] },
+          { old: toUpdateWebhook[1], update: toUpdateDocker[1] },
+          { old: toUpdateWebhook[2], update: toUpdateDocker[2] },
+          { old: toUpdateWebhook[3], update: toUpdateDocker[3] },
         ],
       });
     });

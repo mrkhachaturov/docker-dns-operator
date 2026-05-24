@@ -9,7 +9,7 @@ import { IDnsProvider } from './providers/dns-provider.interface';
 import { DNSTypes } from './dto/dnsbase-entry';
 import { DnsaEntry } from './dto/dnsa-entry';
 import { validDnsAEntry } from './dto/dnsa-entry.spec';
-import { CloudflareProviderRecord } from './cloud-flare/cloudflare-provider-record';
+import { IProviderRecord } from './providers/provider-record.interface';
 
 function makeMockProvider(key: string): DeepMocked<IDnsProvider> {
   return {
@@ -24,18 +24,15 @@ function makeMockProvider(key: string): DeepMocked<IDnsProvider> {
   } as unknown as DeepMocked<IDnsProvider>;
 }
 
-function makeProviderRecord(
-  name: string,
-  type = DNSTypes.A,
-): CloudflareProviderRecord {
-  const r = new CloudflareProviderRecord();
-  r.id = `${name}-id`;
-  r.name = name;
-  r.type = type;
-  r.zoneId = 'zone-1';
-  r.address = '1.2.3.4';
-  r.proxy = false;
-  return r;
+function makeProviderRecord(name: string, type = DNSTypes.A): IProviderRecord {
+  return {
+    id: `${name}-id`,
+    name,
+    type,
+    Key: `${type}:${name}`,
+    providerContext: {},
+    hasSameValue: jest.fn().mockReturnValue(true),
+  };
 }
 
 describe('AppService', () => {

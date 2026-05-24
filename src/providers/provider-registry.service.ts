@@ -21,7 +21,7 @@ export class ProviderRegistry {
     }
     if (this.registry.size === 0) {
       throw new Error(
-        'ProviderRegistry: No providers configured. Set credentials for at least one provider (CloudFlare in-process, or any WEBHOOK_<NAME>_URL sidecar).',
+        'ProviderRegistry: No providers configured. Declare at least one WEBHOOK_<NAME>_URL sidecar.',
       );
     }
   }

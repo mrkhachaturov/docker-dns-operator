@@ -129,6 +129,57 @@ describe('WebhookProviderRecord', () => {
     });
   });
 
+  describe('hasSameValue — Cloudflare proxy round-trip', () => {
+    const proxiedKey = 'external-dns.alpha.kubernetes.io/cloudflare-proxied';
+
+    it('returns false when desired cf.proxy=true but current is false', () => {
+      const desired = plainToInstance(DnsaEntry, {
+        type: DNSTypes.A,
+        name: 'app.example.com',
+        address: '10.1.2.3',
+        providerOptions: { cf: { proxy: true } },
+      });
+      const rec = new WebhookProviderRecord(
+        wire({
+          targets: ['10.1.2.3'],
+          providerSpecific: [{ name: proxiedKey, value: 'false' }],
+        }),
+      );
+      expect(rec.hasSameValue(desired)).toBe(false);
+    });
+
+    it('returns true when both desired and current proxy=true', () => {
+      const desired = plainToInstance(DnsaEntry, {
+        type: DNSTypes.A,
+        name: 'app.example.com',
+        address: '10.1.2.3',
+        providerOptions: { cf: { proxy: true } },
+      });
+      const rec = new WebhookProviderRecord(
+        wire({
+          targets: ['10.1.2.3'],
+          providerSpecific: [{ name: proxiedKey, value: 'true' }],
+        }),
+      );
+      expect(rec.hasSameValue(desired)).toBe(true);
+    });
+
+    it('treats desired with no proxy opinion as matching any current proxy state', () => {
+      const desired = plainToInstance(DnsaEntry, {
+        type: DNSTypes.A,
+        name: 'app.example.com',
+        address: '10.1.2.3',
+      });
+      const rec = new WebhookProviderRecord(
+        wire({
+          targets: ['10.1.2.3'],
+          providerSpecific: [{ name: proxiedKey, value: 'true' }],
+        }),
+      );
+      expect(rec.hasSameValue(desired)).toBe(true);
+    });
+  });
+
   describe('hasSameValue — type mismatch', () => {
     it('a record with type=A never matches a desired CNAME', () => {
       const desired = plainToInstance(DnsCnameEntry, {

@@ -1,8 +1,9 @@
 # Full example — one container, one label, three providers.
 #
-# This is the comprehensive showcase: the operator + the RFC2136 sidecar +
-# a busybox "target" container that carries a single label routing two
-# records (A + MX) to Cloudflare, MikroTik, and Active Directory at once.
+# This is the comprehensive showcase: the operator + two webhook sidecars
+# (ddo-cloudflare, ddo-rfc2136) + a busybox "target" container that carries a
+# single label routing two records (A + MX) to Cloudflare, MikroTik, and
+# Active Directory at once.
 #
 # How to run:
 #   1. cp .env.example .env
@@ -18,6 +19,7 @@ services:
     image: mrkhachaturov/docker-dns-operator:dev
     build: .
     depends_on:
+      - ddo-cloudflare
       - ddo-rfc2136
       - ddo-mikrotik
     environment:
@@ -26,9 +28,8 @@ services:
       INSTANCE_ID: full-example
       EXECUTION_FREQUENCY_SECONDS: 30
 
-      # --- Cloudflare ---------------------------------------------------------
-      # Either API_TOKEN (env) or API_TOKEN_FILE (Docker secret). Prefer _FILE.
-      API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+      # --- Cloudflare (via ddo-cloudflare sidecar) ---------------------------
+      WEBHOOK_CF_URL: http://ddo-cloudflare:9090
 
       # --- MikroTik RouterOS (talks to ddo-mikrotik sidecar) ------------------
       # The operator side now needs only the webhook URL; the RouterOS API
@@ -41,6 +42,21 @@ services:
       WEBHOOK_RFC2136_URL: http://ddo-rfc2136:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  ddo-cloudflare:
+    image: ddo-cloudflare:dev
+    build: ./sidecars/ddo-cloudflare
+    environment:
+      WEBHOOK_LISTEN: ":9090"
+      CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+      # Optional: comma-separated zone allow-list (empty = every zone the
+      # token can see).
+      CLOUDFLARE_ZONES: ${CF_ZONES:-}
+      # Cloudflare convention: 1 = "automatic" TTL.
+      CLOUDFLARE_DEFAULT_TTL: ${CF_DEFAULT_TTL:-1}
+      # Default proxy state when an entry does not set
+      # providerOptions.cf.proxy explicitly.
+      CLOUDFLARE_PROXIED_DEFAULT: ${CF_PROXIED_DEFAULT:-false}
 
   ddo-mikrotik:
     image: ddo-mikrotik:dev

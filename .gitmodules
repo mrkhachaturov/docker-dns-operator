@@ -4,3 +4,6 @@
 [submodule "sidecars/ddo-mikrotik"]
 	path = sidecars/ddo-mikrotik
 	url = https://github.com/mrkhachaturov/ddo-mikrotik.git
+[submodule "sidecars/ddo-cloudflare"]
+	path = sidecars/ddo-cloudflare
+	url = https://github.com/mrkhachaturov/ddo-cloudflare

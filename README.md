@@ -41,24 +41,22 @@ graph LR
     DK["🐳 Docker socket<br/>containers / services"] --> OP["🧭 docker-dns-operator<br/>reconciler"]
     OP --> P{{"🔌 DnsProvider<br/>interface"}}
 
-    P --> CF["☁️ Cloudflare"]
     P --> MT["📡 MikroTik"]
-    P --> RF["🏢 RFC 2136"]
-    P -.-> PLUS["…more providers"]
+    P -->|HTTP| CFW["🔌 ddo-cloudflare<br/>sidecar"]
+    P -->|HTTP| RFW["🔌 ddo-rfc2136<br/>sidecar"]
+    P -.->|HTTP| WHN["…more webhook sidecars"]
 
-    RF -->|HTTP| WH["🔌 Webhook sidecar<br/><i>ddo-rfc2136</i>"]
-    WH -->|GSS-TSIG| AD["Active Directory DNS"]
-    PLUS -.->|HTTP| WHN["…more webhook sidecars"]
+    CFW -->|HTTPS| CF["☁️ Cloudflare API"]
+    RFW -->|GSS-TSIG| AD["🏢 Active Directory DNS"]
 
     style DK fill:#2496ed,color:#fff,stroke:#2496ed
     style OP fill:#0f766e,color:#fff,stroke:#0f766e
     style P fill:#475569,color:#fff,stroke:#475569
     style CF fill:#f38020,color:#fff,stroke:#f38020
+    style CFW fill:#8b5cf6,color:#fff,stroke:#8b5cf6
     style MT fill:#293039,color:#fff,stroke:#293039
-    style RF fill:#0078d4,color:#fff,stroke:#0078d4
-    style WH fill:#8b5cf6,color:#fff,stroke:#8b5cf6
+    style RFW fill:#8b5cf6,color:#fff,stroke:#8b5cf6
     style AD fill:#0078d4,color:#fff,stroke:#0078d4
-    style PLUS fill:#94a3b8,color:#000,stroke-dasharray: 5 5
     style WHN fill:#94a3b8,color:#000,stroke-dasharray: 5 5
 ```
 
@@ -80,16 +78,21 @@ Standalone Docker vs Swarm mode is **auto-detected at startup** via `docker info
 
 ## ⚡ Quick start
 
-Minimum Cloudflare setup. Drop this into a `docker-compose.yml`, supply a token, run `docker compose up -d`:
+Minimum Cloudflare setup using the [ddo-cloudflare](https://github.com/mrkhachaturov/ddo-cloudflare) sidecar. Drop this into a `docker-compose.yml`, supply a token, run `docker compose up -d`:
 
 ```yaml
 services:
+  ddo-cloudflare:
+    image: mrkhachaturov/ddo-cloudflare:latest
+    environment:
+      CLOUDFLARE_API_TOKEN_FILE: /run/secrets/cloudflare_token
+    secrets:
+      - cloudflare_token
+
   dns-operator:
     image: mrkhachaturov/docker-dns-operator:latest
     environment:
-      API_TOKEN_FILE: /run/secrets/cloudflare_token
-    secrets:
-      - cloudflare_token
+      WEBHOOK_CF_URL: http://ddo-cloudflare:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
@@ -115,14 +118,13 @@ For MikroTik or Active Directory, see [Providers](#-providers).
 
 The operator ships three providers today, all implementing the same `DnsProvider` interface. New ones plug in via one file — see [Development](#-development). Providers that need a protocol layer outside Node (Kerberos, signed updates, exotic transports) run as a **webhook sidecar** in their own container, addressed via `<PROVIDER>_WEBHOOK_URL` and shipped from a separate repo attached under [sidecars/](sidecars/) as a git submodule.
 
-### ☁️ Cloudflare
+### ☁️ Cloudflare (via webhook sidecar)
 
-Enabled when `API_TOKEN` **or** `API_TOKEN_FILE` is set. The token needs `Zone.Zone:Read` and `Zone.DNS:Edit` for every zone you manage.
+Enabled by running the [ddo-cloudflare](https://github.com/mrkhachaturov/ddo-cloudflare) sidecar alongside the operator and pointing `WEBHOOK_CF_URL` at it. The sidecar owns the Cloudflare API token, the zone allow-list, and the proxy default — see its [README](https://github.com/mrkhachaturov/ddo-cloudflare#how-to-configure) for the full env list.
 
-Supports A, CNAME, MX, NS, with optional proxying via `providerOptions.cf.proxy`.
+Supports A, AAAA, CNAME, MX, NS, with optional proxying via `providerOptions.cf.proxy` (round-tripped to the sidecar through the standard external-dns providerSpecific property).
 
-> [!WARNING]
-> Use `API_TOKEN_FILE` with a Docker secret in production. `API_TOKEN` plain-env is visible via `docker inspect`.
+The multi-account use case is the main reason this is a sidecar now — run a container per Cloudflare account, each with its own token, route records via `providers: ["cf-personal"]` vs `providers: ["cf-work"]`.
 
 ### 📡 MikroTik RouterOS (via webhook sidecar)
 
@@ -192,7 +194,7 @@ This is the mechanism for declaring **multiple instances of the same backend** �
 A typo in `providers: [...]` (e.g. `mikrotic-home`) causes that entry to fail reconciliation loudly — the operator never guesses what the user meant.
 
 > [!NOTE]
-> RFC 2136 (via [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136)) and MikroTik (via [ddo-mikrotik](https://github.com/mrkhachaturov/ddo-mikrotik)) are both registered through the generic `WEBHOOK_<NAME>_URL` mechanism. Cloudflare remains in-process for now.
+> Every provider — Cloudflare ([ddo-cloudflare](https://github.com/mrkhachaturov/ddo-cloudflare)), MikroTik ([ddo-mikrotik](https://github.com/mrkhachaturov/ddo-mikrotik)), and RFC 2136 ([ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136)) — is now a sidecar registered via `WEBHOOK_<NAME>_URL`. The operator no longer carries any in-process DNS implementation.
 
 | Env var | Default | Purpose |
 |---|---|---|
@@ -221,10 +223,13 @@ A typo in `providers: [...]` (e.g. `mikrotic-home`) causes that entry to fail re
 <details>
 <summary><strong>☁️ Cloudflare</strong></summary>
 
+Cloudflare is now provided by the [ddo-cloudflare](https://github.com/mrkhachaturov/ddo-cloudflare) sidecar. The operator side has a single env var:
+
 | Variable | Default | Description |
 |---|---|---|
-| `API_TOKEN` |  | Cloudflare API token. Setting this OR `API_TOKEN_FILE` enables the provider. |
-| `API_TOKEN_FILE` |  | Path to a file containing the token. Preferred over `API_TOKEN`. |
+| `WEBHOOK_CF_URL` |  | URL of a ddo-cloudflare sidecar, e.g. `http://ddo-cloudflare:9090`. The `CF` token becomes the provider key `cf`. |
+
+For multiple Cloudflare accounts, run multiple sidecars and declare multiple env vars (`WEBHOOK_CF_PERSONAL_URL`, `WEBHOOK_CF_WORK_URL`, …). Each sidecar's own env (API token, zones, proxy default) lives on its container — see the sidecar README.
 
 </details>
 
@@ -315,12 +320,17 @@ labels:
 
 ```yaml
 services:
+  ddo-cloudflare:
+    image: mrkhachaturov/ddo-cloudflare:latest
+    environment:
+      CLOUDFLARE_API_TOKEN_FILE: /run/secrets/cloudflare_token
+    secrets:
+      - cloudflare_token
+
   dns-operator:
     image: mrkhachaturov/docker-dns-operator:latest
     environment:
-      API_TOKEN_FILE: /run/secrets/cloudflare_token
-    secrets:
-      - cloudflare_token
+      WEBHOOK_CF_URL: http://ddo-cloudflare:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
@@ -340,18 +350,23 @@ secrets:
 
 ```yaml
 services:
+  ddo-cloudflare:
+    image: mrkhachaturov/ddo-cloudflare:latest
+    environment:
+      CLOUDFLARE_API_TOKEN_FILE: /run/secrets/cloudflare_token
+    secrets:
+      - cloudflare_token
+
   dns-operator:
     image: mrkhachaturov/docker-dns-operator:latest
     environment:
-      API_TOKEN_FILE: /run/secrets/cloudflare_token
+      WEBHOOK_CF_URL: http://ddo-cloudflare:9090
       WEBHOOK_MIKROTIK_URL: http://ddo-mikrotik:9090
-    secrets:
-      - cloudflare_token
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   ddo-mikrotik:
-    image: ddo-mikrotik:latest
+    image: mrkhachaturov/ddo-mikrotik:latest
     environment:
       MIKROTIK_ADDRESS: 192.168.1.1:8728
       MIKROTIK_USERNAME_FILE: /run/secrets/mikrotik_user
@@ -374,6 +389,49 @@ services:
 
 </details>
 
+<details>
+<summary>☁️ <strong>Multiple Cloudflare accounts</strong></summary>
+
+Run one ddo-cloudflare container per account, declare one env var per container, and route records with the matching provider key:
+
+```yaml
+services:
+  ddo-cloudflare-personal:
+    image: mrkhachaturov/ddo-cloudflare:latest
+    environment:
+      CLOUDFLARE_API_TOKEN_FILE: /run/secrets/cf_personal
+    secrets: [cf_personal]
+
+  ddo-cloudflare-work:
+    image: mrkhachaturov/ddo-cloudflare:latest
+    environment:
+      CLOUDFLARE_API_TOKEN_FILE: /run/secrets/cf_work
+    secrets: [cf_work]
+
+  dns-operator:
+    image: mrkhachaturov/docker-dns-operator:latest
+    environment:
+      WEBHOOK_CF_PERSONAL_URL: http://ddo-cloudflare-personal:9090
+      WEBHOOK_CF_WORK_URL:     http://ddo-cloudflare-work:9090
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  app:
+    image: nginx
+    labels:
+      docker-dns-operator:1: |
+        [
+          { "type": "A", "name": "blog.mydomain.com",  "address": "1.2.3.4", "providers": ["cf-personal"] },
+          { "type": "A", "name": "app.workdomain.com", "address": "1.2.3.4", "providers": ["cf-work"] }
+        ]
+
+secrets:
+  cf_personal: { file: ./cf_personal.txt }
+  cf_work:     { file: ./cf_work.txt }
+```
+
+</details>
+
 ### 🌐 DDNS — public IPv4 of the host
 
 ```yaml
@@ -387,16 +445,27 @@ The operator starts the DDNS service when any entry uses `"DDNS"`, queries the c
 <details>
 <summary>🔢 <strong>Two domains, two operator instances</strong></summary>
 
-Independent Cloudflare tokens by `INSTANCE_ID`:
+Independent operator instances, each pointing at its own Cloudflare sidecar:
 
 ```yaml
 services:
+  ddo-cloudflare-a:
+    image: mrkhachaturov/ddo-cloudflare:latest
+    environment:
+      CLOUDFLARE_API_TOKEN_FILE: /run/secrets/token_a
+    secrets: [token_a]
+
+  ddo-cloudflare-b:
+    image: mrkhachaturov/ddo-cloudflare:latest
+    environment:
+      CLOUDFLARE_API_TOKEN_FILE: /run/secrets/token_b
+    secrets: [token_b]
+
   dns-a:
     image: mrkhachaturov/docker-dns-operator:latest
     environment:
       INSTANCE_ID: a
-      API_TOKEN_FILE: /run/secrets/token_a
-    secrets: [token_a]
+      WEBHOOK_CF_URL: http://ddo-cloudflare-a:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
@@ -404,8 +473,7 @@ services:
     image: mrkhachaturov/docker-dns-operator:latest
     environment:
       INSTANCE_ID: b
-      API_TOKEN_FILE: /run/secrets/token_b
-    secrets: [token_b]
+      WEBHOOK_CF_URL: http://ddo-cloudflare-b:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
@@ -468,11 +536,19 @@ Labels must live under `deploy.labels`, not the top-level `labels` key:
 
 ```yaml
 services:
+  ddo-cloudflare:
+    image: mrkhachaturov/ddo-cloudflare:latest
+    environment:
+      CLOUDFLARE_API_TOKEN_FILE: /run/secrets/cloudflare_token
+    secrets: [cloudflare_token]
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
   dns-operator:
     image: mrkhachaturov/docker-dns-operator:latest
     environment:
-      API_TOKEN_FILE: /run/secrets/cloudflare_token
-    secrets: [cloudflare_token]
+      WEBHOOK_CF_URL: http://ddo-cloudflare:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     deploy:
@@ -513,14 +589,14 @@ The main operator does not currently expose an HTTP health endpoint. The ddo-rfc
 
 | | Concern | Recommendation |
 |---|---|---|
-| 🔑 | Cloudflare tokens | Use `API_TOKEN_FILE` with a Docker secret. Scope to `Zone.Zone:Read` + `Zone.DNS:Edit` on the specific zones only. |
+| 🔑 | Cloudflare tokens | Set `CLOUDFLARE_API_TOKEN_FILE` on the ddo-cloudflare sidecar with a Docker secret. Scope to `Zone.Zone:Read` + `Zone.DNS:Edit` on the specific zones only. |
 | 📡 | MikroTik creds | Least-privilege RouterOS user (`read+write+api` only). Lives on the ddo-mikrotik sidecar, not the operator. Console/SSH/Winbox/REST denied. See [examples/mikrotik/README.md](examples/mikrotik/README.md). |
 | 🏢 | Keytab (rfc2136) | Mount via Docker secret, never a world-readable bind mount. AD service account scoped to update only zones in `RFC2136_ZONES`. |
 | 🐳 | Docker socket | Mount `:ro`. Consider [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) in hostile multi-tenant environments. |
 | 🔓 | TLS | `MIKROTIK_USE_TLS=true` + `MIKROTIK_SKIP_TLS_VERIFY=true` on the sidecar accepts a self-signed cert. Trusted networks only. |
 
 > [!WARNING]
-> `API_TOKEN` plain-env leaks via `docker inspect`, image layers, and container exec. Always prefer `API_TOKEN_FILE` + Docker secrets in production.
+> Plain-env credentials (`CLOUDFLARE_API_TOKEN`, `MIKROTIK_PASSWORD`, etc.) leak via `docker inspect`, image layers, and container exec. Always prefer the `_FILE` variants + Docker secrets in production.
 
 ---
 

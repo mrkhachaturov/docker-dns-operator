@@ -2,8 +2,6 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DockerService } from './docker/docker.service';
 import { DockerFactory } from './docker/docker.factory';
-import { CloudFlareService } from './cloud-flare/cloud-flare.service';
-import { CloudFlareFactory } from './cloud-flare/cloud-flare.factory';
 import { AppService } from './app.service';
 import { ConsoleLoggerService } from './logger.service';
 import { DdnsService } from './ddns/ddns.service';
@@ -12,26 +10,20 @@ import { buildWebhookProviders } from './webhook-provider/registry';
 
 /**
  * Module that registers all the services and factories for the application.
- * Webhook-style providers (RFC2136, MikroTik, and any future sidecar)
- * register dynamically through buildWebhookProviders via WEBHOOK_<NAME>_URL
- * env vars. CloudFlare remains in-process until its own sidecar lands.
+ * Every DNS provider (Cloudflare, MikroTik, RFC2136, and any future sidecar)
+ * registers dynamically through buildWebhookProviders via WEBHOOK_<NAME>_URL
+ * env vars. The operator no longer carries an in-process DNS implementation.
  */
 @Module({
   providers: [
     DockerService,
     DockerFactory,
-    CloudFlareService,
-    CloudFlareFactory,
     AppService,
     ConsoleLoggerService,
     DdnsService,
     {
       provide: ProviderRegistry,
-      useFactory: (
-        cf: CloudFlareService,
-        logger: ConsoleLoggerService,
-        config: ConfigService,
-      ) => {
+      useFactory: (logger: ConsoleLoggerService, config: ConfigService) => {
         const webhookInstances = buildWebhookProviders(
           process.env,
           {
@@ -41,9 +33,9 @@ import { buildWebhookProviders } from './webhook-provider/registry';
           },
           logger,
         );
-        return new ProviderRegistry([cf, ...webhookInstances], logger);
+        return new ProviderRegistry([...webhookInstances], logger);
       },
-      inject: [CloudFlareService, ConsoleLoggerService, ConfigService],
+      inject: [ConsoleLoggerService, ConfigService],
     },
   ],
 })

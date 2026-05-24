@@ -15,7 +15,10 @@ export function normalizeProviders(
   // `providers` field takes precedence over `provider`
   const raw = rawProviders !== undefined ? rawProviders : rawProvider;
 
-  // Absent: backward compatibility — default to CloudFlare
+  // Absent: backward compatibility — default to "cf" so a user upgrading from
+  // the in-process CloudFlare provider only has to add WEBHOOK_CF_URL to keep
+  // routing working. If "cf" isn't registered, the strict-routing guard in
+  // app.service surfaces a clear error.
   if (raw === undefined || raw === null) return ['cf'];
 
   // String (including "all")

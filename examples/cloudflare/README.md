@@ -1,7 +1,8 @@
 # Example: Cloudflare
 
-Minimal end-to-end example: the operator watches a busybox container that
-declares one A-record label, and creates that record in Cloudflare.
+Minimal end-to-end example: the operator and the [ddo-cloudflare](https://github.com/mrkhachaturov/ddo-cloudflare) sidecar
+together watch a busybox container that declares one A-record label, and
+create that record in Cloudflare.
 
 ## Run
 
@@ -36,7 +37,8 @@ docker-dns-operator:cloudflare-example=[{"type":"A","name":"...","address":"..."
 ```
 
 The operator container reads container labels via `/var/run/docker.sock`, sees
-the entry targeted at `cf`, and reconciles it against Cloudflare's API.
+the entry targeted at `cf`, and forwards the desired state to the ddo-cloudflare
+sidecar over HTTP. The sidecar holds the API token and talks to Cloudflare.
 
 Every managed record is tagged with the comment
 `docker-dns-operator:cloudflare-example` so the operator only ever modifies
