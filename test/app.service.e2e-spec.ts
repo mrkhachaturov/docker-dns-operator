@@ -27,6 +27,7 @@ import { validDnsMxEntry } from '../src/dto/dnsmx-entry.spec';
 import { validDnsNsEntry } from '../src/dto/dnsns-entry.spec';
 import { AppModule } from '../src/app.module';
 import { AppService } from '../src/app.service';
+import { DockerService } from '../src/docker/docker.service';
 import { getConfigModuleImport } from '../src/app.configuration';
 
 // mock cloudflare as integration doesn't want to invoke the real third party dependencies.
@@ -148,6 +149,14 @@ describe('AppService (Integration)', () => {
 
     sut = app.get(AppService);
     sut.initialize();
+
+    // Force container-mode discovery regardless of the host Docker daemon's
+    // swarm state. This test seeds plain containers via testcontainers; if the
+    // host daemon happens to be a swarm manager (e.g. left over from another
+    // suite or an operator's local cluster), getSources() would call
+    // listServices() and find nothing, leaving the Cloudflare mocks idle.
+    // eslint-disable-next-line @typescript-eslint/dot-notation
+    app.get(DockerService)['swarmMode'] = false;
 
     mockCloudflareInstance = mockCloudflare.mock
       .instances[0] as jest.Mocked<Cloudflare>;
