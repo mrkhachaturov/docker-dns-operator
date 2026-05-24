@@ -78,26 +78,22 @@ describe('App Configuration', () => {
     const testCases = ['log', 'error', 'warn', 'debug', 'verbose', 'fatal'];
     // eslint-disable-next-line no-restricted-syntax
     for (const element of testCases) {
-      process.env.PROJECT_LABEL = '';
-      process.env.INSTANCE_ID = '';
-      process.env.EXECUTION_FREQUENCY_SECONDS = '';
-      process.env.DDNS_EXECUTION_FREQUENCY_MINUTES = '';
+      const spyLoadConfigurationComposedConstants = jest
+        .spyOn(ConfigurationModule, 'loadConfigurationComposedConstants')
+        .mockReturnValue({ ENTRY_IDENTIFIER: '' });
+
+      process.env.PROJECT_LABEL = 'label';
+      process.env.INSTANCE_ID = '1';
+      process.env.EXECUTION_FREQUENCY_SECONDS = '60';
       process.env.LOG_LEVEL = element;
+      process.env.PRESERVE_STOPPED = 'false';
 
       // eslint-disable-next-line no-await-in-loop
       const sut = await getSystemUnderTest();
 
-      expect(sut.get('PROJECT_LABEL', { infer: true })).toEqual(
-        'docker-dns-operator',
-      );
-      expect(sut.get('INSTANCE_ID', { infer: true })).toEqual('1');
-      expect(sut.get('EXECUTION_FREQUENCY_SECONDS', { infer: true })).toEqual(
-        60,
-      );
-      expect(
-        sut.get('DDNS_EXECUTION_FREQUENCY_MINUTES', { infer: true }),
-      ).toEqual(60);
-      expect(sut.get('LOG_LEVEL', { infer: true })).toEqual('error');
+      expect(sut.get('LOG_LEVEL', { infer: true })).toEqual(element);
+
+      spyLoadConfigurationComposedConstants.mockRestore();
     }
   });
 
