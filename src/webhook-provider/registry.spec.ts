@@ -115,9 +115,7 @@ describe('buildWebhookProviders', () => {
     // and a duplicate "FOO" cannot coexist in the same object literal,
     // so this test asserts the *easier* property: a single valid env
     // produces no collision.
-    expect(() =>
-      buildWebhookProviders(env, opts, stubLogger()),
-    ).not.toThrow();
+    expect(() => buildWebhookProviders(env, opts, stubLogger())).not.toThrow();
     // The defensive duplicate check inside buildWebhookProviders is
     // unreachable via the env-shape input today; kept as a guard against
     // future iterator-based discovery that might surface the same name

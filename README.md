@@ -163,6 +163,41 @@ The operator implements failover across multiple DCs (`RFC2136_HOSTS`) with a pe
 
 See [docs/rfc2136-integration-runbook.md](docs/rfc2136-integration-runbook.md) for keytab generation, AD permission setup, and the full deployment walkthrough.
 
+### 🔌 Generic webhook sidecars
+
+Any sidecar implementing the [kubernetes-sigs/external-dns webhook provider contract v1](https://kubernetes-sigs.github.io/external-dns/latest/docs/tutorials/webhook-provider/) plugs straight into the operator without code changes here. Each instance is declared by a single env var on the operator:
+
+```bash
+WEBHOOK_<NAME>_URL=http://sidecar:9090
+```
+
+`<NAME>` becomes the provider key (lowercased; underscores → hyphens) and is what records reference in their `providers: [...]` label. The operator knows nothing else about the sidecar — credentials, zones, and backend protocol all live inside the sidecar's own container.
+
+| Env var | Provider key |
+|---|---|
+| `WEBHOOK_CF_URL` | `cf` |
+| `WEBHOOK_MIKROTIK_HOME_URL` | `mikrotik-home` |
+| `WEBHOOK_MIKROTIK_OFFICE_URL` | `mikrotik-office` |
+| `WEBHOOK_RFC2136_CORP_URL` | `rfc2136-corp` |
+
+This is the mechanism for declaring **multiple instances of the same backend** — e.g. a home MikroTik and an office MikroTik, with a single label routing one record to both:
+
+```jsonc
+[
+  { "type": "A", "name": "shared.example.com", "address": "10.0.0.5",
+    "providers": ["mikrotik-home", "mikrotik-office"] }
+]
+```
+
+A typo in `providers: [...]` (e.g. `mikrotic-home`) causes that entry to fail reconciliation loudly — the operator never guesses what the user meant.
+
+> [!NOTE]
+> The existing `RFC2136_WEBHOOK_URL` flow for the [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) sidecar is unchanged and continues to register under the `rfc2136` key. The generic `WEBHOOK_<NAME>_URL` mechanism is additive in this release; the in-tree Cloudflare and MikroTik providers will be extracted to sidecars in upcoming releases and registered via the same generic mechanism.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `WEBHOOK_TIMEOUT_SECONDS` | `15` | Per-request HTTP timeout applied to every webhook instance. |
+
 ---
 
 ## ⚙️ Configuration
