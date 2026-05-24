@@ -66,109 +66,35 @@ export const validationSchema = Joi.object({
   MIKROTIK_SKIP_TLS_VERIFY: Joi.boolean().default(false),
   MIKROTIK_DEFAULT_TTL: Joi.number().integer().min(1).default(3600),
 
-  // RFC2136 — all optional at schema level; partial config guard below
-  RFC2136_WEBHOOK_URL: Joi.string()
-    .uri({ scheme: ['http', 'https'] })
-    .optional(),
-  RFC2136_AUTH_MODE: Joi.string().valid('gss-tsig').optional(),
-  RFC2136_HOSTS: Joi.string()
-    .custom((value: string, helpers) => {
-      const entries = value
-        .split(',')
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-      if (entries.length === 0) {
-        return helpers.error('any.invalid');
-      }
-      // eslint-disable-next-line no-restricted-syntax
-      for (const entry of entries) {
-        const isIpv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(entry);
-        const isIpv6 = entry.includes(':');
-        const isBareLabel = !entry.includes('.');
-        if (isIpv4 || isIpv6 || isBareLabel) {
-          return helpers.message({
-            custom: `RFC2136_HOSTS entry "${entry}" is not an FQDN. AD GSS-TSIG requires FQDN host names; expect KDC_ERR_S_PRINCIPAL_UNKNOWN with IP/short names.`,
-          });
-        }
-        if (!/^([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(entry)) {
-          return helpers.message({
-            custom: `RFC2136_HOSTS entry "${entry}" is not a valid FQDN.`,
-          });
-        }
-      }
-      return value;
-    })
-    .optional(),
-  RFC2136_PORT: Joi.number().integer().min(1).max(65535).default(53),
-  RFC2136_ZONES: Joi.string().optional(),
-  RFC2136_KERBEROS_REALM: Joi.string().optional(),
-  RFC2136_KERBEROS_PRINCIPAL: Joi.string()
-    .pattern(/^[^\s@]+@[A-Z][A-Z0-9._-]*$/)
-    .optional(),
-  RFC2136_KRB5_CONF: Joi.string().default('/etc/krb5.conf'),
-  RFC2136_DEFAULT_TTL: Joi.number().integer().min(60).default(3600),
-  RFC2136_MIN_TTL: Joi.number().integer().min(0).default(60),
-  RFC2136_AXFR_TIMEOUT_SECONDS: Joi.number().integer().min(1).default(30),
-  RFC2136_UPDATE_TIMEOUT_SECONDS: Joi.number().integer().min(1).default(15),
-  RFC2136_CIRCUIT_BREAKER_THRESHOLD: Joi.number().integer().min(1).default(3),
-  RFC2136_DRY_RUN: Joi.boolean().default(false),
-  RFC2136_AXFR_ENABLED: Joi.boolean().default(true),
-  RFC2136_DOMAIN_FILTER: Joi.string().optional(),
-})
-  .custom((value, helpers) => {
-    // Partial MikroTik config check: all-or-nothing.
-    // *_FILE variants count as the corresponding credential being supplied.
-    const {
-      MIKROTIK_BASEURL,
-      MIKROTIK_USERNAME,
-      MIKROTIK_USERNAME_FILE,
-      MIKROTIK_PASSWORD,
-      MIKROTIK_PASSWORD_FILE,
-    } = value;
-    const hasUsername = !!(MIKROTIK_USERNAME || MIKROTIK_USERNAME_FILE);
-    const hasPassword = !!(MIKROTIK_PASSWORD || MIKROTIK_PASSWORD_FILE);
-    const mikrotikSetCount = [
-      Boolean(MIKROTIK_BASEURL),
-      hasUsername,
-      hasPassword,
-    ].filter(Boolean).length;
-    if (mikrotikSetCount > 0 && mikrotikSetCount < 3) {
-      return helpers.error('any.invalid', {
-        message:
-          'MIKROTIK_BASEURL, MIKROTIK_USERNAME (or _FILE), and MIKROTIK_PASSWORD (or _FILE) must all be set or all be absent',
-      });
-    }
-    return value;
-  })
-  .custom((value, helpers) => {
-    // Partial RFC2136 config check: all-or-nothing
-    const required = [
-      'RFC2136_WEBHOOK_URL',
-      'RFC2136_AUTH_MODE',
-      'RFC2136_HOSTS',
-      'RFC2136_ZONES',
-      'RFC2136_KERBEROS_REALM',
-      'RFC2136_KERBEROS_PRINCIPAL',
-    ];
-    const present = required.filter(
-      (k) => value[k] !== undefined && value[k] !== '',
-    );
-    if (present.length > 0 && present.length < required.length) {
-      const missing = required.filter((k) => !present.includes(k));
-      return helpers.message({
-        custom: `RFC2136 partial config: present=[${present.join(', ')}] missing=[${missing.join(', ')}]. All-or-nothing.`,
-      });
-    }
-    if (present.length === required.length) {
-      const principalRealm = value.RFC2136_KERBEROS_PRINCIPAL.split('@')[1];
-      if (principalRealm !== value.RFC2136_KERBEROS_REALM.toUpperCase()) {
-        return helpers.message({
-          custom: `RFC2136_KERBEROS_PRINCIPAL realm "${principalRealm}" does not match RFC2136_KERBEROS_REALM "${value.RFC2136_KERBEROS_REALM}".`,
-        });
-      }
-    }
-    return value;
-  });
+  // RFC2136 (and any other webhook sidecar) is now registered via the
+  // generic WEBHOOK_<NAME>_URL mechanism — see src/webhook-provider/registry.ts.
+  // All RFC2136-specific env vars (hosts, zones, kerberos, etc.) moved
+  // into the ddo-rfc2136 sidecar's own environment.
+}).custom((value, helpers) => {
+  // Partial MikroTik config check: all-or-nothing.
+  // *_FILE variants count as the corresponding credential being supplied.
+  const {
+    MIKROTIK_BASEURL,
+    MIKROTIK_USERNAME,
+    MIKROTIK_USERNAME_FILE,
+    MIKROTIK_PASSWORD,
+    MIKROTIK_PASSWORD_FILE,
+  } = value;
+  const hasUsername = !!(MIKROTIK_USERNAME || MIKROTIK_USERNAME_FILE);
+  const hasPassword = !!(MIKROTIK_PASSWORD || MIKROTIK_PASSWORD_FILE);
+  const mikrotikSetCount = [
+    Boolean(MIKROTIK_BASEURL),
+    hasUsername,
+    hasPassword,
+  ].filter(Boolean).length;
+  if (mikrotikSetCount > 0 && mikrotikSetCount < 3) {
+    return helpers.error('any.invalid', {
+      message:
+        'MIKROTIK_BASEURL, MIKROTIK_USERNAME (or _FILE), and MIKROTIK_PASSWORD (or _FILE) must all be set or all be absent',
+    });
+  }
+  return value;
+});
 
 /**
  * Loads the configuration api token file whilst the configuration is being loaded.
@@ -293,20 +219,5 @@ export interface IConfiguration {
   MIKROTIK_PASSWORD_FILE?: string;
   MIKROTIK_SKIP_TLS_VERIFY: boolean;
   MIKROTIK_DEFAULT_TTL: number;
-  RFC2136_WEBHOOK_URL?: string;
-  RFC2136_AUTH_MODE?: 'gss-tsig';
-  RFC2136_HOSTS?: string;
-  RFC2136_PORT: number;
-  RFC2136_ZONES?: string;
-  RFC2136_KERBEROS_REALM?: string;
-  RFC2136_KERBEROS_PRINCIPAL?: string;
-  RFC2136_KRB5_CONF: string;
-  RFC2136_DEFAULT_TTL: number;
-  RFC2136_MIN_TTL: number;
-  RFC2136_AXFR_TIMEOUT_SECONDS: number;
-  RFC2136_UPDATE_TIMEOUT_SECONDS: number;
-  RFC2136_CIRCUIT_BREAKER_THRESHOLD: number;
-  RFC2136_DRY_RUN: boolean;
-  RFC2136_AXFR_ENABLED: boolean;
-  RFC2136_DOMAIN_FILTER?: string;
+  WEBHOOK_TIMEOUT_SECONDS: number;
 }

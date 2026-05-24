@@ -3,13 +3,13 @@ import { AppModule } from './app.module';
 import { AppService } from './app.service';
 import { getConfigModuleImport } from './app.configuration';
 import { ConsoleLoggerService } from './logger.service';
-import { Rfc2136Service } from './rfc2136/rfc2136.service';
 
 /**
- * Main application bootstrap!
- * Initializes the NestJS application.
- * Initializes the application services.
- * Starts the CRON job to synchronise the DNS entries.
+ * Main application bootstrap.
+ * RFC2136 (and any other webhook sidecar) is reached via the generic
+ * WEBHOOK_<NAME>_URL mechanism; no per-provider startup probe is needed
+ * — sidecar health is surfaced through the standard reconciliation
+ * error path.
  */
 async function bootstrap() {
   const app = await NestFactory.createApplicationContext(
@@ -22,10 +22,6 @@ async function bootstrap() {
   app.enableShutdownHooks();
   const appService = app.get(AppService);
   appService.initialize();
-  const rfc2136 = app.get(Rfc2136Service);
-  if (rfc2136.isConfigured()) {
-    await rfc2136.probeSidecar();
-  }
   appService.start();
 }
 bootstrap();
