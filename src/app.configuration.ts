@@ -28,6 +28,11 @@ export const validationSchema = Joi.object({
   PRESERVE_STOPPED: Joi.boolean().default(false),
   // Swarm vs container mode is auto-detected at runtime from `docker info`;
   // no env var. See DockerService.resolveSwarmMode().
+
+  // Generic webhook providers — N instances declared via WEBHOOK_<NAME>_URL.
+  // No Joi validation on those keys (they're dynamic); see
+  // webhook-provider/registry.ts for parsing and URL validation.
+  WEBHOOK_TIMEOUT_SECONDS: Joi.number().integer().min(1).default(15),
   // CloudFlare — both optional at schema level; runtime check in CloudFlareService.isConfigured()
   API_TOKEN: Joi.string()
     .pattern(/^[A-Za-z0-9_-]+$/)

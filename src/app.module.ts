@@ -13,6 +13,7 @@ import { AppService } from './app.service';
 import { ConsoleLoggerService } from './logger.service';
 import { DdnsService } from './ddns/ddns.service';
 import { ProviderRegistry } from './providers/provider-registry.service';
+import { buildWebhookProviders } from './webhook-provider/registry';
 
 /**
  * Module that registers all the services and factories for the application
@@ -55,12 +56,25 @@ import { ProviderRegistry } from './providers/provider-registry.service';
         mt: MikrotikService,
         rfc: Rfc2136Service,
         logger: ConsoleLoggerService,
-      ) => new ProviderRegistry([cf, mt, rfc], logger),
+        config: ConfigService,
+      ) => {
+        const webhookInstances = buildWebhookProviders(
+          process.env,
+          {
+            timeoutMs:
+              Number(config.get('WEBHOOK_TIMEOUT_SECONDS') ?? 15) * 1000,
+            ownershipLabel: `${config.get('PROJECT_LABEL') ?? 'docker-dns-operator'}:${config.get('INSTANCE_ID') ?? '1'}`,
+          },
+          logger,
+        );
+        return new ProviderRegistry([cf, mt, rfc, ...webhookInstances], logger);
+      },
       inject: [
         CloudFlareService,
         MikrotikService,
         Rfc2136Service,
         ConsoleLoggerService,
+        ConfigService,
       ],
     },
   ],
