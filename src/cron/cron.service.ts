@@ -50,15 +50,31 @@ export abstract class CronService implements OnModuleDestroy {
     this.loggerService.log(
       `Staring CRON job for ${this.ServiceName}, execution frequency is every ${this.ExecutionFrequencySeconds} seconds`,
     );
-    await this.job();
+    await this.runJobSafely();
     const queue = () => {
       this.startedTimeoutToken = setTimeout(async () => {
-        await this.job();
+        await this.runJobSafely();
         queue();
       }, this.ExecutionFrequencySeconds * 1000);
     };
     queue();
     this.stateCron = State.Started;
+  }
+
+  // A failing tick (network blip, downstream API outage, expired creds) must
+  // not crash the operator — it has to keep ticking so the next cycle can
+  // recover. Node 24 turns unhandled rejections into hard exits, so we catch
+  // here at the cron boundary rather than relying on every provider to never
+  // reject.
+  private async runJobSafely(): Promise<void> {
+    try {
+      await this.job();
+    } catch (err) {
+      this.loggerService.error(
+        `CronService (${this.ServiceName}): job threw, continuing — will retry on next tick`,
+        err instanceof Error ? err.stack ?? err.message : String(err),
+      );
+    }
   }
 
   /**

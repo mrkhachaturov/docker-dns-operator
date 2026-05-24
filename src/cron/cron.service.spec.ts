@@ -127,12 +127,74 @@ describe('CronService', () => {
 
       // assert
       expect(spyJob).toHaveBeenCalledTimes(2);
-      expect(mockConsoleLoggerService.verbose).toHaveBeenCalledTimes(1);
+      // verbose is fired by the @LogDecorator wrapper. Two decorated paths run:
+      //   start()         → 1
+      //   runJobSafely() x2 (initial + tick) → 2
+      expect(mockConsoleLoggerService.verbose).toHaveBeenCalledTimes(3);
       expect(mockSetTimeout).toHaveBeenCalledTimes(1);
       expect(mockSetTimeout).toHaveBeenCalledWith(
         expect.any(Function),
         mockExecuteIntervalSecondsValue * 1000,
       );
+    });
+  });
+
+  describe('job failure does not crash the cron loop', () => {
+    let spyJob: jest.SpyInstance;
+
+    beforeEach(() => {
+      spyJob = jest.spyOn(sut, 'job');
+    });
+
+    afterEach(() => {
+      spyJob.mockRestore();
+    });
+
+    it('initial tick that throws is caught — start() still resolves and the loop is armed', async () => {
+      // arrange
+      spyJob.mockRejectedValue(new Error('downstream provider is down'));
+      sut['stateCron'] = State.Stopped;
+      delete sut['startedTimeoutToken'];
+
+      // act
+      await expect(sut.start()).resolves.toBeUndefined();
+
+      // assert — the rejection was swallowed and logged, the loop kept going
+      expect(spyJob).toHaveBeenCalledTimes(1);
+      expect(mockConsoleLoggerService.error).toHaveBeenCalledWith(
+        expect.stringContaining('job threw, continuing'),
+        expect.any(String),
+      );
+      expect(sut['stateCron']).toEqual(State.Started);
+      expect(sut['startedTimeoutToken']).toBe(mockSetTimeoutValue);
+      expect(mockSetTimeout).toHaveBeenCalled();
+    });
+
+    it('subsequent tick that throws is caught — next setTimeout is still scheduled', async () => {
+      // arrange — first tick succeeds, second throws
+      spyJob
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('connection refused mid-run'));
+      sut['stateCron'] = State.Stopped;
+      delete sut['startedTimeoutToken'];
+      mockSetTimeout.mockClear();
+      mockConsoleLoggerService.error.mockClear();
+
+      await sut.start();
+      const tick = mockSetTimeout.mock.lastCall?.[0];
+      if (!tick) throw new Error('expected setTimeout to be armed');
+      mockSetTimeout.mockClear();
+
+      // act — run the tick that will throw
+      await expect((tick as () => Promise<void>)()).resolves.toBeUndefined();
+
+      // assert — error logged, loop re-armed for the next interval
+      expect(spyJob).toHaveBeenCalledTimes(2);
+      expect(mockConsoleLoggerService.error).toHaveBeenCalledWith(
+        expect.stringContaining('job threw, continuing'),
+        expect.any(String),
+      );
+      expect(mockSetTimeout).toHaveBeenCalledTimes(1);
     });
   });
 
