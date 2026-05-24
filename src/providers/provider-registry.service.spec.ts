@@ -53,39 +53,4 @@ describe('ProviderRegistry', () => {
       expect(sut.getAll()[0].providerKey).toBe('cf');
     });
   });
-
-  describe('resolve', () => {
-    beforeEach(() => sut.initialize());
-
-    it('resolves a known configured provider', () => {
-      expect(sut.resolve(['cf'])).toHaveLength(1);
-    });
-
-    it('returns empty and warns for unknown provider', () => {
-      const result = sut.resolve(['unknown']);
-      expect(result).toHaveLength(0);
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining("unknown or unconfigured provider 'unknown'"),
-      );
-    });
-
-    it('returns empty and warns for unconfigured provider', () => {
-      const result = sut.resolve(['mikrotik']);
-      expect(result).toHaveLength(0);
-      expect(logger.warn).toHaveBeenCalled();
-    });
-
-    it('resolves "all" to all registered providers', () => {
-      expect(sut.resolve(['all'])).toHaveLength(1);
-    });
-
-    it('resolves multiple keys', () => {
-      const bothConfigured = new ProviderRegistry(
-        [makeProvider('cf', true), makeProvider('mikrotik', true)],
-        logger,
-      );
-      bothConfigured.initialize();
-      expect(bothConfigured.resolve(['cf', 'mikrotik'])).toHaveLength(2);
-    });
-  });
 });

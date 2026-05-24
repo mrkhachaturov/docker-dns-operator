@@ -118,13 +118,25 @@ export class AppService extends CronService {
     } else if (this.ddnsService.getState() === CronState.Started)
       await this.ddnsService.stop();
 
-    // Warn once (before the per-provider loop) for any unknown/unconfigured provider
-    // keys referenced across ALL entries.
-    const allReferencedKeys = new Set(
-      allDockerEntries.flatMap((e) => e.providers ?? ['cf']),
+    // Strict per-entry provider validation. An entry with any unknown
+    // provider name in its `providers: [...]` list (other than the special
+    // `"all"` token) is rejected loudly with a per-entry ERROR log and
+    // skipped for the rest of this cycle. Other entries reconcile as
+    // normal. We never silently fall back or guess what a typo meant —
+    // see docs/sidecar-architecture.md "Naming and registration".
+    const knownKeys = new Set(
+      this.providerRegistry.getAll().map((p) => p.providerKey),
     );
-    allReferencedKeys.delete('all'); // 'all' is a special token, not a provider key
-    this.providerRegistry.resolve([...allReferencedKeys]); // emits warnings as side-effect
+    const knownKeysList = [...knownKeys].sort().join(', ') || '(none)';
+    const reconcilableEntries = allDockerEntries.filter((entry) => {
+      const refs = entry.providers ?? ['cf'];
+      const unknown = refs.filter((r) => r !== 'all' && !knownKeys.has(r));
+      if (unknown.length === 0) return true;
+      this.loggerService.error(
+        `AppService: entry ${entry.Key} (${entry.type} ${entry.name}) references unknown provider(s) [${unknown.join(', ')}]; configured providers: [${knownKeysList}]. Entry skipped.`,
+      );
+      return false;
+    });
 
     // eslint-disable-next-line no-restricted-syntax
     for (const provider of this.providerRegistry.getAll()) {
@@ -133,7 +145,7 @@ export class AppService extends CronService {
       if (provider.prepareForJob) await provider.prepareForJob();
 
       // Filter entries targeting this provider
-      const targeted = allDockerEntries.filter(
+      const targeted = reconcilableEntries.filter(
         (e) =>
           (e.providers ?? ['cf']).includes(provider.providerKey) ||
           (e.providers ?? ['cf']).includes('all'),

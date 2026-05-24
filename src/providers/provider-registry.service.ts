@@ -29,18 +29,4 @@ export class ProviderRegistry {
   getAll(): IDnsProvider[] {
     return [...this.registry.values()];
   }
-
-  resolve(keys: string[]): IDnsProvider[] {
-    if (keys.includes('all')) return this.getAll();
-    return keys.flatMap((key) => {
-      const provider = this.registry.get(key);
-      if (!provider) {
-        this.loggerService.warn(
-          `ProviderRegistry: unknown or unconfigured provider '${key}', skipping`,
-        );
-        return [];
-      }
-      return [provider];
-    });
-  }
 }
