@@ -12,7 +12,7 @@ adds:
 
 - **MikroTik RouterOS** provider (alongside CloudFlare)
 - **Per-entry provider routing** via a `providers` label
-- **Docker Swarm** discovery (`DOCKER_SWARM_MODE=true`)
+- **Docker Swarm** discovery (auto-detected at startup via `docker info`)
 
 The service reads DNS labels from Docker containers (or Swarm services), reconciles them
 against the configured providers on a CRON tick, and tags managed records with an
@@ -83,8 +83,10 @@ for verification.
 - **Ownership tagging** — managed records carry `${PROJECT_LABEL}:${INSTANCE_ID}` as a
   comment. Reconciliation only diffs records matching that tag — unrelated records are
   never touched.
-- **Swarm mode** — `DockerService.getSources()` switches between container and service
-  enumeration based on `DOCKER_SWARM_MODE`. In Swarm mode, labels must be set via
+- **Swarm mode** — `DockerService.resolveSwarmMode()` calls `docker info` on the first
+  `getSources()` tick and caches the result. Swarm mode is enabled iff
+  `Swarm.LocalNodeState === 'active'` AND `Swarm.ControlAvailable === true` (i.e.
+  the operator landed on a manager). In Swarm mode labels must be set via
   `deploy.labels`, and `PRESERVE_STOPPED` is irrelevant (services are always listed).
 
 ## Conventions

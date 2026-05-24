@@ -49,7 +49,9 @@ export class DockerService {
 
   private preserveStopped: boolean;
 
-  private swarmMode: boolean;
+  // Resolved lazily on the first getSources() call. undefined = not yet
+  // resolved; true/false = the result of explicit env or auto-detect.
+  private swarmMode?: boolean;
 
   private state = States.Unintialized;
 
@@ -62,7 +64,10 @@ export class DockerService {
   }
 
   /**
-   * Initializes the class by fetching the docker instance
+   * Initializes the class by fetching the docker instance.
+   * Swarm-mode is resolved lazily on the first getSources() call so this
+   * stays a synchronous boot step.
+   *
    * @throws { Error } If service is already initialized
    * @throws { NestedError } throws if err initializing docker
    */
@@ -87,17 +92,55 @@ export class DockerService {
     this.preserveStopped = this.configService.get('PRESERVE_STOPPED', {
       infer: true,
     }) as boolean;
-    this.swarmMode = this.configService.get('DOCKER_SWARM_MODE', {
-      infer: true,
-    }) as boolean;
+
+    this.state = States.Initialized;
+  }
+
+  /**
+   * Auto-detects whether to query swarm services (listServices) or local
+   * containers (listContainers). Probes the daemon via `docker info` exactly
+   * once and caches the result.
+   *
+   * Decision matrix:
+   *   - Swarm.LocalNodeState === 'active' AND ControlAvailable === true
+   *     (we're a manager and can call listServices) → swarm mode.
+   *   - Anything else (inactive / locked / worker-only / docker.info failed)
+   *     → container mode, reading whatever local containers we can see.
+   *
+   * Implication for operators: if you want one operator instance to see DNS
+   * labels across the whole cluster, run it on a manager node. A worker-node
+   * operator only sees containers running on that worker.
+   */
+  private async resolveSwarmMode(): Promise<boolean> {
+    if (this.swarmMode !== undefined) return this.swarmMode;
+
+    try {
+      const info = (await this.docker.info()) as {
+        Swarm?: { LocalNodeState?: string; ControlAvailable?: boolean };
+      };
+      const state = info.Swarm?.LocalNodeState ?? 'inactive';
+      const isManager = info.Swarm?.ControlAvailable === true;
+      this.loggerService.log(
+        `DockerService, resolveSwarmMode: LocalNodeState=${state} ControlAvailable=${isManager} → ${
+          state === 'active' && isManager ? 'swarm' : 'container'
+        } mode`,
+      );
+      this.swarmMode = state === 'active' && isManager;
+    } catch (error) {
+      this.loggerService.warn(
+        `DockerService, resolveSwarmMode: docker.info() failed, falling back to container mode: ${
+          (error as Error).message
+        }`,
+      );
+      this.swarmMode = false;
+    }
 
     if (this.swarmMode && this.preserveStopped) {
       this.loggerService.warn(
-        'DockerService, initialize: PRESERVE_STOPPED has no effect in DOCKER_SWARM_MODE',
+        'DockerService, resolveSwarmMode: PRESERVE_STOPPED has no effect on a swarm manager (services are always listed)',
       );
     }
-
-    this.state = States.Initialized;
+    return this.swarmMode;
   }
 
   /**
@@ -115,7 +158,8 @@ export class DockerService {
       );
 
     try {
-      if (!this.swarmMode) {
+      const swarm = await this.resolveSwarmMode();
+      if (!swarm) {
         return await this.docker.listContainers({
           all: this.preserveStopped,
           filters: JSON.stringify({ label: [this.dockerLabel] }),

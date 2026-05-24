@@ -7,7 +7,7 @@
 
 | | Scope | Meaning |
 |---|---|---|
-| 🐳 | Runs on | Standalone Docker (default) and Docker Swarm (`DOCKER_SWARM_MODE=true`) |
+| 🐳 | Runs on | Standalone Docker and Docker Swarm — auto-detected at startup |
 | 🏷️ | Source of truth | Container labels, or Swarm `deploy.labels` |
 | 🔄 | Reconciler | Reads labels every `EXECUTION_FREQUENCY_SECONDS`, diffs, applies |
 | 🌐 | Providers | Cloudflare, MikroTik RouterOS, RFC 2136 / Active Directory |
@@ -64,12 +64,12 @@ graph LR
 
 Each tick the reconciler:
 
-1. 📥 Lists Docker containers (or Swarm services when `DOCKER_SWARM_MODE=true`).
+1. 📥 Lists Docker containers, or Swarm services when running on a manager node.
 2. 🏷️ Parses the `${PROJECT_LABEL}:${INSTANCE_ID}` label as a JSON array of entries.
 3. 🔀 Groups entries by their `providers` field.
 4. ⚖️ For each provider, diffs desired state against owned records and applies create/update/delete.
 
-Standalone Docker is the default. Swarm mode is opt-in via `DOCKER_SWARM_MODE=true`, in which case labels must live under `deploy.labels` and the operator must run on a manager node.
+Standalone Docker vs Swarm mode is **auto-detected at startup** via `docker info`. On a Swarm manager the operator switches to `listServices` and reads labels from `deploy.labels`. On a worker or non-swarm host it falls back to local containers. To manage labels across the whole cluster from a single operator instance, run it on a manager node.
 
 > [!IMPORTANT]
 > Every managed record carries a sibling TXT record at `ddo-<type>.<name>` whose value is `owned-by=${PROJECT_LABEL}:${INSTANCE_ID}`. The reconciler refuses to modify any record without that marker.
@@ -178,8 +178,7 @@ See [docs/rfc2136-integration-runbook.md](docs/rfc2136-integration-runbook.md) f
 | `INSTANCE_ID` | `1` | Second half of the label key. Combined as `${PROJECT_LABEL}:${INSTANCE_ID}`. |
 | `EXECUTION_FREQUENCY_SECONDS` | `60` | Reconciliation interval. Integer ≥ 1. |
 | `DDNS_EXECUTION_FREQUENCY_MINUTES` | `60` | Public IP check interval. Only active when an entry uses `"address": "DDNS"`. |
-| `PRESERVE_STOPPED` | `false` | If `true`, stopped containers keep their DNS entries. Removed containers always lose them. Ignored in Swarm mode. |
-| `DOCKER_SWARM_MODE` | `false` | If `true`, discover entries from Swarm services (`deploy.labels`) instead of containers. |
+| `PRESERVE_STOPPED` | `false` | If `true`, stopped containers keep their DNS entries. Removed containers always lose them. Ignored on a Swarm manager. |
 | `LOG_LEVEL` | `error` | One of `fatal`, `error`, `warn`, `log`, `debug`, `verbose`. |
 
 </details>
@@ -435,7 +434,6 @@ services:
   dns-operator:
     image: mrkhachaturov/docker-dns-operator:latest
     environment:
-      DOCKER_SWARM_MODE: "true"
       API_TOKEN_FILE: /run/secrets/cloudflare_token
     secrets: [cloudflare_token]
     volumes:

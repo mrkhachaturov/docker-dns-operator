@@ -322,8 +322,6 @@ describe('DockerService (Integration)', () => {
     });
 
     afterAll(async () => {
-      delete process.env.DOCKER_SWARM_MODE;
-
       if (createdServiceId) {
         const service = dockerode.getService(createdServiceId);
         await service.remove();
@@ -353,8 +351,8 @@ describe('DockerService (Integration)', () => {
       const created = await dockerode.createService(serviceSpec);
       createdServiceId = created.ID ?? (created as any).id;
 
-      // act — init DockerService in swarm mode and call getSources()
-      process.env.DOCKER_SWARM_MODE = 'true';
+      // act — init DockerService; swarm mode is auto-detected because the
+      // test runner just joined the daemon as a manager via swarmInit above.
       await initialize();
 
       const sources = await sut.getSources();

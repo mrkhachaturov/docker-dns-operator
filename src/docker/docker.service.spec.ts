@@ -69,7 +69,6 @@ describe('DockerService', () => {
   const mockConfigServiceGetValue = {
     ENTRY_IDENTIFIER: 'project-label:instance-id',
     PRESERVE_STOPPED: false,
-    DOCKER_SWARM_MODE: false,
   };
   let expectedDockerLabel = '';
   let expectedPreserveStopped = false;
@@ -136,19 +135,20 @@ describe('DockerService', () => {
       // assert
       expect(mockDockerFactory.get).toHaveBeenCalledTimes(1);
       expect(sut['docker']).toBe(mockDockerFactoryGetValue);
-      expect(mockConfigService.get).toHaveBeenCalledTimes(3);
+      // initialize reads ENTRY_IDENTIFIER + PRESERVE_STOPPED. Swarm vs
+      // container mode is auto-detected lazily via docker.info() inside
+      // resolveSwarmMode() on first getSources() — no config read.
+      expect(mockConfigService.get).toHaveBeenCalledTimes(2);
       expect(mockConfigService.get).toHaveBeenCalledWith('ENTRY_IDENTIFIER', {
         infer: true,
       });
       expect(mockConfigService.get).toHaveBeenCalledWith('PRESERVE_STOPPED', {
         infer: true,
       });
-      expect(mockConfigService.get).toHaveBeenCalledWith('DOCKER_SWARM_MODE', {
-        infer: true,
-      });
       expect(sut['dockerLabel']).toEqual(expectedDockerLabel);
       expect(sut['preserveStopped']).toEqual(expectedPreserveStopped);
-      expect(sut['swarmMode']).toEqual(false);
+      // swarmMode stays undefined until first getSources() — lazy detection.
+      expect(sut['swarmMode']).toBeUndefined();
       expect(sut['state']).toBe(States.Initialized);
       expect(mockConsoleLoggerService.verbose).toHaveBeenCalledTimes(1);
       expect(mockConsoleLoggerService.verbose).toHaveBeenCalledWith(
@@ -241,7 +241,9 @@ describe('DockerService', () => {
               filters: JSON.stringify({ label: [expectedDockerLabel] }),
             },
           );
-          expect(mockConsoleLoggerService.verbose).toHaveBeenCalledTimes(1);
+          // getSources is decorated → 1 verbose; resolveSwarmMode is also
+          // decorated and fires on first call → 1 more verbose.
+          expect(mockConsoleLoggerService.verbose).toHaveBeenCalledTimes(2);
           expect(mockConsoleLoggerService.verbose).toHaveBeenCalledWith(
             expect.objectContaining({
               level: 'trace',
@@ -360,22 +362,74 @@ describe('DockerService', () => {
         await expect(async () => sut.getSources()).rejects.toThrow(error);
       });
 
-      it('should warn if PRESERVE_STOPPED is also true during initialize', () => {
-        // arrange
+      it('should warn if PRESERVE_STOPPED is also true on a swarm manager', async () => {
+        // arrange — manager-capable daemon + preserve-stopped on
+        (mockDockerFactoryGetValue as any).info = jest.fn().mockResolvedValue({
+          Swarm: { LocalNodeState: 'active', ControlAvailable: true },
+        });
         mockConfigService.get.mockImplementation((key) => {
-          if (key === 'DOCKER_SWARM_MODE') return true;
           if (key === 'PRESERVE_STOPPED') return true;
           return mockConfigServiceGetValue[key];
         });
         sut['state'] = States.Unintialized;
-
-        // act
+        delete sut['swarmMode'];
         sut.initialize();
+
+        // act — the warning lives in resolveSwarmMode, triggered on first getSources
+        await sut.getSources();
 
         // assert
         expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
-          'DockerService, initialize: PRESERVE_STOPPED has no effect in DOCKER_SWARM_MODE',
+          'DockerService, resolveSwarmMode: PRESERVE_STOPPED has no effect on a swarm manager (services are always listed)',
         );
+      });
+    });
+
+    describe('resolveSwarmMode (lazy auto-detection)', () => {
+      beforeEach(() => {
+        delete sut['swarmMode'];
+      });
+
+      it('auto-detects swarm when daemon is an active manager', async () => {
+        (mockDockerFactoryGetValue as any).info = jest.fn().mockResolvedValue({
+          Swarm: { LocalNodeState: 'active', ControlAvailable: true },
+        });
+        expect(await sut['resolveSwarmMode']()).toBe(true);
+        expect(sut['swarmMode']).toBe(true);
+      });
+
+      it('falls back to container mode when daemon is inactive (no swarm)', async () => {
+        (mockDockerFactoryGetValue as any).info = jest.fn().mockResolvedValue({
+          Swarm: { LocalNodeState: 'inactive', ControlAvailable: false },
+        });
+        expect(await sut['resolveSwarmMode']()).toBe(false);
+      });
+
+      it('falls back to container mode when daemon is a worker, not manager', async () => {
+        (mockDockerFactoryGetValue as any).info = jest.fn().mockResolvedValue({
+          Swarm: { LocalNodeState: 'active', ControlAvailable: false },
+        });
+        expect(await sut['resolveSwarmMode']()).toBe(false);
+      });
+
+      it('falls back to container mode and warns when docker.info() fails', async () => {
+        (mockDockerFactoryGetValue as any).info = jest
+          .fn()
+          .mockRejectedValue(new Error('socket-proxy denies /info'));
+        expect(await sut['resolveSwarmMode']()).toBe(false);
+        expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
+          expect.stringContaining('falling back to container mode'),
+        );
+      });
+
+      it('caches the result — second call does not re-query the daemon', async () => {
+        const infoMock = jest.fn().mockResolvedValue({
+          Swarm: { LocalNodeState: 'active', ControlAvailable: true },
+        });
+        (mockDockerFactoryGetValue as any).info = infoMock;
+        await sut['resolveSwarmMode']();
+        await sut['resolveSwarmMode']();
+        expect(infoMock).toHaveBeenCalledTimes(1);
       });
     });
 
