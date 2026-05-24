@@ -50,50 +50,11 @@ export const validationSchema = Joi.object({
     .default('error')
     .valid('log', 'error', 'warn', 'debug', 'verbose', 'fatal'),
 
-  // MikroTik — all optional at schema level; partial config guard below.
-  // *_FILE variants resolve to *_USERNAME / *_PASSWORD via loadConfigurationMikrotikSecretFiles().
-  MIKROTIK_BASEURL: Joi.string().uri().optional(),
-  MIKROTIK_USERNAME: Joi.string().min(1).trim().optional(),
-  MIKROTIK_USERNAME_FILE: Joi.string()
-    .pattern(/^\/run\/secrets\/[A-Za-z0-9-_]+$/)
-    .trim()
-    .optional(),
-  MIKROTIK_PASSWORD: Joi.string().min(1).optional(),
-  MIKROTIK_PASSWORD_FILE: Joi.string()
-    .pattern(/^\/run\/secrets\/[A-Za-z0-9-_]+$/)
-    .trim()
-    .optional(),
-  MIKROTIK_SKIP_TLS_VERIFY: Joi.boolean().default(false),
-  MIKROTIK_DEFAULT_TTL: Joi.number().integer().min(1).default(3600),
-
-  // RFC2136 (and any other webhook sidecar) is now registered via the
-  // generic WEBHOOK_<NAME>_URL mechanism — see src/webhook-provider/registry.ts.
-  // All RFC2136-specific env vars (hosts, zones, kerberos, etc.) moved
-  // into the ddo-rfc2136 sidecar's own environment.
-}).custom((value, helpers) => {
-  // Partial MikroTik config check: all-or-nothing.
-  // *_FILE variants count as the corresponding credential being supplied.
-  const {
-    MIKROTIK_BASEURL,
-    MIKROTIK_USERNAME,
-    MIKROTIK_USERNAME_FILE,
-    MIKROTIK_PASSWORD,
-    MIKROTIK_PASSWORD_FILE,
-  } = value;
-  const hasUsername = !!(MIKROTIK_USERNAME || MIKROTIK_USERNAME_FILE);
-  const hasPassword = !!(MIKROTIK_PASSWORD || MIKROTIK_PASSWORD_FILE);
-  const mikrotikSetCount = [
-    Boolean(MIKROTIK_BASEURL),
-    hasUsername,
-    hasPassword,
-  ].filter(Boolean).length;
-  if (mikrotikSetCount > 0 && mikrotikSetCount < 3) {
-    return helpers.error('any.invalid', {
-      message:
-        'MIKROTIK_BASEURL, MIKROTIK_USERNAME (or _FILE), and MIKROTIK_PASSWORD (or _FILE) must all be set or all be absent',
-    });
-  }
-  return value;
+  // MikroTik (and RFC2136, and any other webhook sidecar) is now registered
+  // via the generic WEBHOOK_<NAME>_URL mechanism — see
+  // src/webhook-provider/registry.ts. All MikroTik-specific env vars
+  // (address, username, password, default TTL, zones) moved into the
+  // ddo-mikrotik sidecar's own environment.
 });
 
 /**
@@ -140,44 +101,6 @@ export const loadConfigurationApiTokenFile = () => {
   }
 };
 
-function readSecretFile(envName: string, path: string): string {
-  try {
-    const content = readFileSync(path, { encoding: 'utf8' }).trim();
-    if (content.length === 0) {
-      throw new Error(`File at ${path} is empty`);
-    }
-    return content;
-  } catch (error) {
-    throw new NestedError(
-      `app.configuration, ${envName}: Failed reading secret file ${path}`,
-      error,
-    );
-  }
-}
-
-/**
- * Resolves MikroTik secret files (MIKROTIK_USERNAME_FILE, MIKROTIK_PASSWORD_FILE)
- * into MIKROTIK_USERNAME / MIKROTIK_PASSWORD. Mirrors the pattern used for
- * API_TOKEN_FILE so RouterOS credentials can be supplied as Docker secrets.
- * @throws {NestedError} if a referenced secret file is missing or empty
- */
-export const loadConfigurationMikrotikSecretFiles = () => {
-  const out: { MIKROTIK_USERNAME?: string; MIKROTIK_PASSWORD?: string } = {};
-  if (process.env.MIKROTIK_USERNAME_FILE !== undefined) {
-    out.MIKROTIK_USERNAME = readSecretFile(
-      'MIKROTIK_USERNAME_FILE',
-      process.env.MIKROTIK_USERNAME_FILE,
-    );
-  }
-  if (process.env.MIKROTIK_PASSWORD_FILE !== undefined) {
-    out.MIKROTIK_PASSWORD = readSecretFile(
-      'MIKROTIK_PASSWORD_FILE',
-      process.env.MIKROTIK_PASSWORD_FILE,
-    );
-  }
-  return out;
-};
-
 /**
  * Dynamically computes configuration entries from other configuration entries.
  * @returns Composed configuration values to be accessible from ConfigService
@@ -195,11 +118,7 @@ export const loadConfigurationComposedConstants = () => {
  */
 export const getConfigModuleImport = () =>
   ConfigModule.forRoot({
-    load: [
-      loadConfigurationApiTokenFile,
-      loadConfigurationMikrotikSecretFiles,
-      loadConfigurationComposedConstants,
-    ],
+    load: [loadConfigurationApiTokenFile, loadConfigurationComposedConstants],
     cache: false,
     ignoreEnvVars: false,
     ignoreEnvFile: true,
@@ -212,12 +131,5 @@ export interface IConfiguration {
   INSTANCE_ID: string;
   ENTRY_IDENTIFIER: string;
   PRESERVE_STOPPED: boolean;
-  MIKROTIK_BASEURL?: string;
-  MIKROTIK_USERNAME?: string;
-  MIKROTIK_USERNAME_FILE?: string;
-  MIKROTIK_PASSWORD?: string;
-  MIKROTIK_PASSWORD_FILE?: string;
-  MIKROTIK_SKIP_TLS_VERIFY: boolean;
-  MIKROTIK_DEFAULT_TTL: number;
   WEBHOOK_TIMEOUT_SECONDS: number;
 }

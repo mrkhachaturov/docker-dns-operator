@@ -124,13 +124,13 @@ Supports A, CNAME, MX, NS, with optional proxying via `providerOptions.cf.proxy`
 > [!WARNING]
 > Use `API_TOKEN_FILE` with a Docker secret in production. `API_TOKEN` plain-env is visible via `docker inspect`.
 
-### 📡 MikroTik RouterOS
+### 📡 MikroTik RouterOS (via webhook sidecar)
 
-Enabled when `MIKROTIK_BASEURL` is set and either `MIKROTIK_USERNAME`/`MIKROTIK_PASSWORD` or their `_FILE` variants are provided. Talks to the RouterOS REST API on the same port as the web UI (`www` 80 / `www-ssl` 443).
+Enabled when `WEBHOOK_MIKROTIK_URL` is set on the operator and the [ddo-mikrotik](https://github.com/mrkhachaturov/ddo-mikrotik) sidecar is reachable at that URL. The sidecar talks the **native RouterOS binary API** (port 8728 cleartext / 8729 api-ssl), not REST — see the sidecar's README for the full env var list and the dedicated RouterOS user setup.
 
-Supports A, CNAME, MX, NS.
+Supports A, AAAA, CNAME, MX, NS.
 
-If your router uses a self-signed certificate, set `MIKROTIK_SKIP_TLS_VERIFY=true`. Trusted networks only.
+The sidecar lives in its own repo at [mrkhachaturov/ddo-mikrotik](https://github.com/mrkhachaturov/ddo-mikrotik) and is attached here as a git submodule under [sidecars/ddo-mikrotik/](sidecars/ddo-mikrotik/). Ownership is round-tripped through the row's `comment` field: the operator stamps `labels.owner` on every Endpoint, the sidecar persists it verbatim and reads it back on the next list — so two operators with different `INSTANCE_ID`s can safely share the same router.
 
 ### 🏢 RFC 2136 / Active Directory (via webhook sidecar)
 
@@ -192,7 +192,7 @@ This is the mechanism for declaring **multiple instances of the same backend** �
 A typo in `providers: [...]` (e.g. `mikrotic-home`) causes that entry to fail reconciliation loudly — the operator never guesses what the user meant.
 
 > [!NOTE]
-> The existing `RFC2136_WEBHOOK_URL` flow for the [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) sidecar is unchanged and continues to register under the `rfc2136` key. The generic `WEBHOOK_<NAME>_URL` mechanism is additive in this release; the in-tree Cloudflare and MikroTik providers will be extracted to sidecars in upcoming releases and registered via the same generic mechanism.
+> RFC 2136 (via [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136)) and MikroTik (via [ddo-mikrotik](https://github.com/mrkhachaturov/ddo-mikrotik)) are both registered through the generic `WEBHOOK_<NAME>_URL` mechanism. Cloudflare remains in-process for now.
 
 | Env var | Default | Purpose |
 |---|---|---|
@@ -229,17 +229,13 @@ A typo in `providers: [...]` (e.g. `mikrotic-home`) causes that entry to fail re
 </details>
 
 <details>
-<summary><strong>📡 MikroTik</strong></summary>
+<summary><strong>📡 MikroTik — operator-side env</strong></summary>
+
+The operator's only MikroTik-related variable is the URL of the sidecar. All RouterOS configuration (address, credentials, TLS, default TTL, zones) lives on the [ddo-mikrotik](https://github.com/mrkhachaturov/ddo-mikrotik) sidecar's environment — see its README for the full list.
 
 | Variable | Default | Description |
 |---|---|---|
-| `MIKROTIK_BASEURL` |  | Base URL of the RouterOS REST API, e.g. `https://192.168.1.1`. Required to enable the provider. |
-| `MIKROTIK_USERNAME` |  | API username. Set this OR `MIKROTIK_USERNAME_FILE`. |
-| `MIKROTIK_USERNAME_FILE` |  | Path to a file containing the username, e.g. `/run/secrets/mikrotik_user`. Preferred over `MIKROTIK_USERNAME`. |
-| `MIKROTIK_PASSWORD` |  | API password. Set this OR `MIKROTIK_PASSWORD_FILE`. |
-| `MIKROTIK_PASSWORD_FILE` |  | Path to a file containing the password, e.g. `/run/secrets/mikrotik_pass`. Preferred over `MIKROTIK_PASSWORD`. |
-| `MIKROTIK_SKIP_TLS_VERIFY` | `false` | Disable TLS verification. Trusted networks only. |
-| `MIKROTIK_DEFAULT_TTL` | `3600` | TTL applied to newly created records, in seconds. |
+| `WEBHOOK_MIKROTIK_URL` |  | URL of the `ddo-mikrotik` webhook sidecar, e.g. `http://ddo-mikrotik:9090`. Probed at `<URL>/healthz` on startup. |
 
 </details>
 
@@ -348,15 +344,21 @@ services:
     image: mrkhachaturov/docker-dns-operator:latest
     environment:
       API_TOKEN_FILE: /run/secrets/cloudflare_token
-      MIKROTIK_BASEURL: "https://192.168.1.1"
+      WEBHOOK_MIKROTIK_URL: http://ddo-mikrotik:9090
+    secrets:
+      - cloudflare_token
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  ddo-mikrotik:
+    image: ddo-mikrotik:latest
+    environment:
+      MIKROTIK_ADDRESS: 192.168.1.1:8728
       MIKROTIK_USERNAME_FILE: /run/secrets/mikrotik_user
       MIKROTIK_PASSWORD_FILE: /run/secrets/mikrotik_pass
     secrets:
-      - cloudflare_token
       - mikrotik_user
       - mikrotik_pass
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
 
   app:
     image: nginx
@@ -512,10 +514,10 @@ The main operator does not currently expose an HTTP health endpoint. The ddo-rfc
 | | Concern | Recommendation |
 |---|---|---|
 | 🔑 | Cloudflare tokens | Use `API_TOKEN_FILE` with a Docker secret. Scope to `Zone.Zone:Read` + `Zone.DNS:Edit` on the specific zones only. |
-| 📡 | MikroTik creds | Least-privilege RouterOS user that can manage `/ip/dns/static` via REST. Console, SSH, and Winbox access denied. |
+| 📡 | MikroTik creds | Least-privilege RouterOS user (`read+write+api` only). Lives on the ddo-mikrotik sidecar, not the operator. Console/SSH/Winbox/REST denied. See [examples/mikrotik/README.md](examples/mikrotik/README.md). |
 | 🏢 | Keytab (rfc2136) | Mount via Docker secret, never a world-readable bind mount. AD service account scoped to update only zones in `RFC2136_ZONES`. |
 | 🐳 | Docker socket | Mount `:ro`. Consider [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) in hostile multi-tenant environments. |
-| 🔓 | TLS | `MIKROTIK_SKIP_TLS_VERIFY=true` disables certificate validation. Trusted networks only. |
+| 🔓 | TLS | `MIKROTIK_USE_TLS=true` + `MIKROTIK_SKIP_TLS_VERIFY=true` on the sidecar accepts a self-signed cert. Trusted networks only. |
 
 > [!WARNING]
 > `API_TOKEN` plain-env leaks via `docker inspect`, image layers, and container exec. Always prefer `API_TOKEN_FILE` + Docker secrets in production.

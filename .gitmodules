@@ -1,3 +1,6 @@
 [submodule "sidecars/ddo-rfc2136"]
 	path = sidecars/ddo-rfc2136
 	url = https://github.com/mrkhachaturov/ddo-rfc2136
+[submodule "sidecars/ddo-mikrotik"]
+	path = sidecars/ddo-mikrotik
+	url = https://github.com/mrkhachaturov/ddo-mikrotik.git

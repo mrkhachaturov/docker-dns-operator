@@ -6,7 +6,11 @@ import { IProviderRecord } from './provider-record.interface';
  * A provider is activated only when isConfigured() returns true.
  */
 export interface IDnsProvider {
-  /** Short identifier used in label routing. Values: 'cf', 'mikrotik' */
+  /**
+   * Short identifier used in label routing. 'cf' for the in-process
+   * CloudFlare provider; otherwise the lower-cased <NAME> from
+   * WEBHOOK_<NAME>_URL (e.g. 'mikrotik', 'rfc2136').
+   */
   readonly providerKey: string;
 
   /** Returns true if all required env vars for this provider are set. */

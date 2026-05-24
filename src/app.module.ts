@@ -4,8 +4,6 @@ import { DockerService } from './docker/docker.service';
 import { DockerFactory } from './docker/docker.factory';
 import { CloudFlareService } from './cloud-flare/cloud-flare.service';
 import { CloudFlareFactory } from './cloud-flare/cloud-flare.factory';
-import { MikrotikService } from './mikrotik/mikrotik.service';
-import { MikrotikFactory } from './mikrotik/mikrotik.factory';
 import { AppService } from './app.service';
 import { ConsoleLoggerService } from './logger.service';
 import { DdnsService } from './ddns/ddns.service';
@@ -14,8 +12,9 @@ import { buildWebhookProviders } from './webhook-provider/registry';
 
 /**
  * Module that registers all the services and factories for the application.
- * Webhook-style providers (RFC2136, and any future sidecar) register
- * dynamically through buildWebhookProviders via WEBHOOK_<NAME>_URL env vars.
+ * Webhook-style providers (RFC2136, MikroTik, and any future sidecar)
+ * register dynamically through buildWebhookProviders via WEBHOOK_<NAME>_URL
+ * env vars. CloudFlare remains in-process until its own sidecar lands.
  */
 @Module({
   providers: [
@@ -23,8 +22,6 @@ import { buildWebhookProviders } from './webhook-provider/registry';
     DockerFactory,
     CloudFlareService,
     CloudFlareFactory,
-    MikrotikService,
-    MikrotikFactory,
     AppService,
     ConsoleLoggerService,
     DdnsService,
@@ -32,7 +29,6 @@ import { buildWebhookProviders } from './webhook-provider/registry';
       provide: ProviderRegistry,
       useFactory: (
         cf: CloudFlareService,
-        mt: MikrotikService,
         logger: ConsoleLoggerService,
         config: ConfigService,
       ) => {
@@ -45,14 +41,9 @@ import { buildWebhookProviders } from './webhook-provider/registry';
           },
           logger,
         );
-        return new ProviderRegistry([cf, mt, ...webhookInstances], logger);
+        return new ProviderRegistry([cf, ...webhookInstances], logger);
       },
-      inject: [
-        CloudFlareService,
-        MikrotikService,
-        ConsoleLoggerService,
-        ConfigService,
-      ],
+      inject: [CloudFlareService, ConsoleLoggerService, ConfigService],
     },
   ],
 })

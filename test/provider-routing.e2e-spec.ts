@@ -3,7 +3,12 @@
  * Verifies that DNS entries are routed to the correct provider(s) based on
  * the `providers` label field.
  *
- * Uses mocked DockerService (no containers needed) and mocked CloudFlare/MikroTik.
+ * After the MikroTik extraction this file no longer exercises the in-process
+ * MikroTik service — that path has moved to the ddo-mikrotik sidecar. The
+ * routing logic itself still lives in the operator and is unit-tested in
+ * src/app.service.spec.ts. These e2e cases focus on CloudFlare (the last
+ * remaining in-process provider) and on the strict-routing behaviour for
+ * unknown provider keys.
  */
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -24,19 +29,6 @@ import { validDnsAEntry } from '../src/dto/dnsa-entry.spec';
 jest.mock('cloudflare');
 const mockCloudflare = Cloudflare as jest.MockedClass<typeof Cloudflare>;
 
-// Mock global fetch for MikroTik REST API
-global.fetch = jest.fn();
-const mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
-
-function makeJsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: jest.fn().mockResolvedValue(body),
-    text: jest.fn().mockResolvedValue(JSON.stringify(body)),
-  } as unknown as Response;
-}
-
 function makeEntry(name: string, providers: string[]): DnsaEntry {
   const e = validDnsAEntry(DnsaEntry, { name });
   e.providers = providers;
@@ -50,11 +42,6 @@ describe('AppService — provider routing (e2e)', () => {
   let mockCfDnsRecords: jest.Mocked<Cloudflare['dns']['records']>;
 
   beforeAll(async () => {
-    // Set MikroTik env vars so MikrotikService.isConfigured() returns true
-    process.env.MIKROTIK_BASEURL = 'https://192.168.1.1';
-    process.env.MIKROTIK_USERNAME = 'admin';
-    process.env.MIKROTIK_PASSWORD = 'secret';
-
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [
         {
@@ -105,22 +92,13 @@ describe('AppService — provider routing (e2e)', () => {
     mockCloudflareInstance.dns = mockCfDns;
   });
 
-  afterAll(() => {
-    delete process.env.MIKROTIK_BASEURL;
-    delete process.env.MIKROTIK_USERNAME;
-    delete process.env.MIKROTIK_PASSWORD;
-  });
-
   beforeEach(() => {
     mockCfDnsRecords.create.mockClear();
     mockCfDnsRecords.update.mockClear();
     mockCfDnsRecords.delete.mockClear();
-    mockFetch.mockReset();
-    // MikroTik: getRecords returns [], createEntry returns success
-    mockFetch.mockResolvedValue(makeJsonResponse([]));
   });
 
-  it('entry with providers=["cf"] is only synced to CloudFlare', async () => {
+  it('entry with providers=["cf"] is synced to CloudFlare', async () => {
     const cfEntry = makeEntry('cf-only.testdomain.com', ['cf']);
     mockDockerService.getSources.mockResolvedValue([]);
     (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
@@ -129,58 +107,10 @@ describe('AppService — provider routing (e2e)', () => {
 
     await sut.job();
 
-    // CF should have created the entry
     expect(mockCfDnsRecords.create).toHaveBeenCalledTimes(1);
-    // MikroTik fetch should only be for getRecords (not create)
-    const putCalls = (mockFetch.mock.calls as any[]).filter(
-      ([, opts]) => opts?.method === 'PUT',
-    );
-    expect(putCalls).toHaveLength(0);
   });
 
-  it('entry with providers=["mikrotik"] is only synced to MikroTik', async () => {
-    const mtEntry = makeEntry('mikrotik-only.testdomain.com', ['mikrotik']);
-    mockDockerService.getSources.mockResolvedValue([]);
-    (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
-      mtEntry,
-    ]);
-    // MikroTik: getRecords then createEntry
-    mockFetch
-      .mockResolvedValueOnce(makeJsonResponse([])) // getRecords
-      .mockResolvedValueOnce(makeJsonResponse({ '.id': '*1' })); // createEntry
-
-    await sut.job();
-
-    // CF should NOT create anything
-    expect(mockCfDnsRecords.create).not.toHaveBeenCalled();
-    // MikroTik fetch should have a PUT call
-    const putCalls = (mockFetch.mock.calls as any[]).filter(
-      ([, opts]) => opts?.method === 'PUT',
-    );
-    expect(putCalls).toHaveLength(1);
-    expect(putCalls[0][1].body).toContain('mikrotik-only.testdomain.com');
-  });
-
-  it('entry with providers=["cf","mikrotik"] is synced to both', async () => {
-    const bothEntry = makeEntry('both.testdomain.com', ['cf', 'mikrotik']);
-    mockDockerService.getSources.mockResolvedValue([]);
-    (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
-      bothEntry,
-    ]);
-    mockFetch
-      .mockResolvedValueOnce(makeJsonResponse([])) // getRecords
-      .mockResolvedValueOnce(makeJsonResponse({ '.id': '*1' })); // createEntry
-
-    await sut.job();
-
-    expect(mockCfDnsRecords.create).toHaveBeenCalledTimes(1);
-    const putCalls = (mockFetch.mock.calls as any[]).filter(
-      ([, opts]) => opts?.method === 'PUT',
-    );
-    expect(putCalls).toHaveLength(1);
-  });
-
-  it('entry without providers field defaults to CF only (backward compat)', async () => {
+  it('entry without providers field defaults to all configured providers', async () => {
     const defaultEntry = validDnsAEntry(DnsaEntry, {
       name: 'default.testdomain.com',
     });
@@ -192,29 +122,34 @@ describe('AppService — provider routing (e2e)', () => {
 
     await sut.job();
 
+    // The only configured provider in this test is CF — so it gets the entry.
     expect(mockCfDnsRecords.create).toHaveBeenCalledTimes(1);
-    const putCalls = (mockFetch.mock.calls as any[]).filter(
-      ([, opts]) => opts?.method === 'PUT',
-    );
-    expect(putCalls).toHaveLength(0);
   });
 
-  it('entry with providers=["all"] is synced to both CF and MikroTik', async () => {
+  it('entry with providers=["all"] is synced to every configured provider', async () => {
     const allEntry = makeEntry('all.testdomain.com', ['all']);
     mockDockerService.getSources.mockResolvedValue([]);
     (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
       allEntry,
     ]);
-    mockFetch
-      .mockResolvedValueOnce(makeJsonResponse([])) // getRecords
-      .mockResolvedValueOnce(makeJsonResponse({ '.id': '*1' })); // createEntry
 
     await sut.job();
 
     expect(mockCfDnsRecords.create).toHaveBeenCalledTimes(1);
-    const putCalls = (mockFetch.mock.calls as any[]).filter(
-      ([, opts]) => opts?.method === 'PUT',
-    );
-    expect(putCalls).toHaveLength(1);
+  });
+
+  it('entry referencing an unknown provider is skipped (strict routing)', async () => {
+    const unknownEntry = makeEntry('unknown.testdomain.com', ['mikrotik']);
+    mockDockerService.getSources.mockResolvedValue([]);
+    (mockDockerService.extractDNSEntries as jest.Mock).mockReturnValue([
+      unknownEntry,
+    ]);
+
+    await sut.job();
+
+    // "mikrotik" is no longer configured in-process; the entry must not
+    // round-trip to CloudFlare even though that's the only configured
+    // provider — strict routing rejects unknown keys outright.
+    expect(mockCfDnsRecords.create).not.toHaveBeenCalled();
   });
 });

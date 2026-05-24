@@ -18,26 +18,26 @@ function makeProvider(key: string, configured: boolean): IDnsProvider {
 describe('ProviderRegistry', () => {
   let logger: DeepMocked<ConsoleLoggerService>;
   let cfProvider: IDnsProvider;
-  let mikrotikProvider: IDnsProvider;
+  let otherProvider: IDnsProvider;
   let sut: ProviderRegistry;
 
   beforeEach(() => {
     logger = createMock<ConsoleLoggerService>();
     cfProvider = makeProvider('cf', true);
-    mikrotikProvider = makeProvider('mikrotik', false);
-    sut = new ProviderRegistry([cfProvider, mikrotikProvider], logger);
+    otherProvider = makeProvider('other', false);
+    sut = new ProviderRegistry([cfProvider, otherProvider], logger);
   });
 
   describe('initialize', () => {
     it('registers configured providers and initializes them', () => {
       sut.initialize();
       expect(cfProvider.initialize).toHaveBeenCalledTimes(1);
-      expect(mikrotikProvider.initialize).not.toHaveBeenCalled();
+      expect(otherProvider.initialize).not.toHaveBeenCalled();
     });
 
     it('throws when no providers are configured', () => {
       const emptyRegistry = new ProviderRegistry(
-        [makeProvider('cf', false), makeProvider('mikrotik', false)],
+        [makeProvider('cf', false), makeProvider('other', false)],
         logger,
       );
       expect(() => emptyRegistry.initialize()).toThrow(
