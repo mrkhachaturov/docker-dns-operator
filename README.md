@@ -119,7 +119,9 @@ For MikroTik or Active Directory, see [Providers](#-providers).
 
 ## 🌐 Providers
 
-Every backend is a webhook sidecar speaking the [external-dns webhook provider v1](https://kubernetes-sigs.github.io/external-dns/latest/docs/tutorials/webhook-provider/) contract. The operator itself has no in-process DNS implementation — it discovers any number of named sidecars from `WEBHOOK_<NAME>_URL` env vars and routes records to them by name. Three reference sidecars live under [sidecars/](sidecars/) as git submodules; adding a new backend means publishing a sidecar repo and pointing the operator at it via one more env var (no operator code changes).
+In docker-dns-operator every backend lives in its own **webhook sidecar** container. The operator itself has no in-process DNS implementation — it discovers any number of named sidecars from `WEBHOOK_<NAME>_URL` env vars and routes records to them by name. Three reference sidecars live under [sidecars/](sidecars/) as git submodules; adding a new backend means publishing a sidecar repo and pointing the operator at it via one more env var (no operator code changes).
+
+The wire format between operator and sidecar is the [kubernetes-sigs/external-dns webhook provider v1 contract](https://kubernetes-sigs.github.io/external-dns/latest/docs/tutorials/webhook-provider/) — a deliberate choice so the same sidecar serves docker-dns-operator and the upstream external-dns controller interchangeably. This project owns the operator side (Docker label parsing, reconciliation, fan-out routing); the sidecars own the protocol layer to each DNS backend.
 
 ### ☁️ Cloudflare (via webhook sidecar)
 
