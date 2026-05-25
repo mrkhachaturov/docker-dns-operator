@@ -1,14 +1,9 @@
 # CLAUDE.md
 
-Guidance for Claude Code (and other AI assistants) when working in this repository.
-
-> This file is public. Keep it free of secrets, hostnames, internal URLs, and personal
-> context. Anything internal belongs in `CLAUDE.local.md` (gitignored).
-
 ## Project overview
 
-Fork of [timk153/docker-external-dns](https://github.com/timk153/docker-external-dns) that
-adds:
+Docker-aware DNS operator. Reads container labels (or Swarm `deploy.labels`),
+reconciles A/AAAA/CNAME/MX/NS records via external-dns webhook v1 sidecars.
 
 - **Sidecar-based DNS providers** — every backend (Cloudflare, MikroTik, RFC 2136) is
   a standalone webhook sidecar discovered via `WEBHOOK_<NAME>_URL` env vars. The
@@ -141,21 +136,16 @@ on `main` blocks force-push, requires linear history + resolved conversations.
   [.upstream/external-dns](https://github.com/kubernetes-sigs/external-dns) before
   inventing a shape.
 
-## Public-repo hygiene
+## Placeholder conventions in committed examples
 
-This is a public OSS repo. NEVER commit:
+- AD/Kerberos realm: `AD.EXAMPLE.ORG` or `CORP.EXAMPLE.COM`.
+- DC FQDN: `dc01.ad.example.org`.
+- Zones/hostnames: `example.com` / `example.org` / `example.net` (RFC 2606).
+- IPv4: RFC 5737 — `192.0.2.x` / `198.51.100.x` / `203.0.113.x`.
+- RouterOS / LAN IPs: RFC 1918 ranges are fine for docs (`10.0.0.1`, `192.168.1.1`).
 
-- Real AD/Kerberos realm names (use `AD.EXAMPLE.ORG` / `CORP.EXAMPLE.COM`).
-- Real DC FQDNs (use `dc01.ad.example.org`).
-- Real router IPs / hostnames / credentials.
-- Real Cloudflare zone names. Use `example.com` / `example.org` / `example.net`
-  (RFC 2606) or RFC 5737 (`192.0.2.x` / `198.51.100.x` / `203.0.113.x`) for IPs.
-
-The `examples/rfc2136/krb5.conf` file is **gitignored**; only
-`examples/rfc2136/krb5.conf.example` (with placeholder realm) is committed.
-Same pattern for `.env` vs `.env.example`.
-
-If you're unsure whether something is real or example, ask before committing.
+`examples/rfc2136/krb5.conf` is gitignored; only the `.example` is committed.
+Same for `.env` vs `.env.example`.
 
 ## When making changes
 
