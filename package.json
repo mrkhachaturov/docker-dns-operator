@@ -1,6 +1,6 @@
 {
   "name": "docker-dns-operator",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Declarative DNS for Docker & Swarm — the Docker analog of kubernetes-sigs/external-dns. Label your containers; the operator reconciles A/AAAA/CNAME/MX/NS via external-dns webhook v1 sidecars (Cloudflare, MikroTik RouterOS, RFC 2136/GSS-TSIG, or your own). Per-entry routing, multi-instance ownership tagging.",
   "author": "Ruben Khachaturov <mr.kha4a2rov@protonmail.com>",
   "license": "MIT",

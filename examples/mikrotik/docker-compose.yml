@@ -15,7 +15,7 @@
 
 services:
   docker-dns-operator:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.0
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
     build: ../..
     depends_on:
       - ddo-mikrotik
@@ -24,15 +24,18 @@ services:
       PROJECT_LABEL: docker-dns-operator
       INSTANCE_ID: mikrotik-example
       EXECUTION_FREQUENCY_SECONDS: 30
+      # Coalesce bursts of Docker events (e.g. a compose up creating many
+      # services at once) into a single reconcile. Range 50–10000.
+      RECONCILE_DEBOUNCE_MS: 500
       WEBHOOK_MIKROTIK_URL: http://ddo-mikrotik:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   ddo-mikrotik:
-    image: ghcr.io/mrkhachaturov/ddo-mikrotik:0.1.0
+    image: ghcr.io/mrkhachaturov/ddo-mikrotik:0.1.1
     build: ../../sidecars/ddo-mikrotik
     environment:
-      WEBHOOK_LISTEN: ":9090"
+      WEBHOOK_LISTEN: ':9090'
       MIKROTIK_ADDRESS: ${MIKROTIK_ADDRESS:?set MIKROTIK_ADDRESS in .env}
       MIKROTIK_USERNAME: ${MIKROTIK_USERNAME:?set MIKROTIK_USERNAME in .env}
       MIKROTIK_PASSWORD: ${MIKROTIK_PASSWORD:?set MIKROTIK_PASSWORD in .env}

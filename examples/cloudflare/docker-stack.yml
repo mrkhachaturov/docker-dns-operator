@@ -14,13 +14,16 @@
 
 services:
   docker-dns-operator:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.0
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
     environment:
       LOG_LEVEL: debug
       PROJECT_LABEL: docker-dns-operator
       INSTANCE_ID: cloudflare-swarm-example
-      EXECUTION_FREQUENCY_SECONDS: "30"
-      WEBHOOK_TIMEOUT_SECONDS: "60"
+      EXECUTION_FREQUENCY_SECONDS: '30'
+      # Coalesce bursts of Docker events (e.g. a stack deploy creating many
+      # services at once) into a single reconcile. Range 50–10000.
+      RECONCILE_DEBOUNCE_MS: '500'
+      WEBHOOK_TIMEOUT_SECONDS: '60'
       WEBHOOK_CF_URL: http://ddo-cloudflare:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -33,9 +36,9 @@ services:
         condition: on-failure
 
   ddo-cloudflare:
-    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.0
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.1
     environment:
-      WEBHOOK_LISTEN: ":9090"
+      WEBHOOK_LISTEN: ':9090'
       CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
       CLOUDFLARE_ZONES: ${CF_ZONES:-}
       CLOUDFLARE_DEFAULT_TTL: ${CF_DEFAULT_TTL:-1}

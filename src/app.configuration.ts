@@ -13,11 +13,25 @@ export const validationSchema = Joi.object({
     .trim()
     .empty('')
     .default('1'),
+  // Fallback reconcile interval. Docker events are the primary trigger; this
+  // timer is the safety net for missed events AND the only mechanism that
+  // propagates DDNS public-IP changes (which have no Docker event). Keep low
+  // (default 60s) unless you don't use DDNS — DDNS IP propagation latency is
+  // bounded by this value.
   EXECUTION_FREQUENCY_SECONDS: Joi.number()
     .integer()
     .min(1)
     .empty('')
     .default(60),
+  // Coalesces bursts of Docker events (e.g. a stack deploy creating 10
+  // services at once) into a single reconcile pass. Larger values reduce CPU
+  // and provider API load but increase reaction latency.
+  RECONCILE_DEBOUNCE_MS: Joi.number()
+    .integer()
+    .min(50)
+    .max(10000)
+    .empty('')
+    .default(500),
   DDNS_EXECUTION_FREQUENCY_MINUTES: Joi.number()
     .integer()
     .min(1)
@@ -25,11 +39,10 @@ export const validationSchema = Joi.object({
     .default(60),
   PRESERVE_STOPPED: Joi.boolean().default(false),
 
-  // Liveness marker file — touched at the end of every reconciliation tick
-  // (success or caught failure). Empty string (the default) disables the
-  // feature. The Dockerfile sets a path so the bundled HEALTHCHECK has
-  // something to stat without requiring caller configuration.
-  LIVENESS_FILE: Joi.string().allow('').default(''),
+  // HTTP port for the liveness endpoint (GET /healthz). 9090 mirrors the
+  // sidecars so probes are uniform across all containers. Bound on 0.0.0.0
+  // by the bootstrap so peer containers can curl it for debugging.
+  HEALTH_PORT: Joi.number().integer().min(1).max(65535).default(9090),
   // Swarm vs container mode is auto-detected at runtime from `docker info`;
   // no env var. See DockerService.resolveSwarmMode().
 
@@ -81,6 +94,7 @@ export interface IConfiguration {
   INSTANCE_ID: string;
   ENTRY_IDENTIFIER: string;
   PRESERVE_STOPPED: boolean;
-  LIVENESS_FILE: string;
+  HEALTH_PORT: number;
+  RECONCILE_DEBOUNCE_MS: number;
   WEBHOOK_TIMEOUT_SECONDS: number;
 }

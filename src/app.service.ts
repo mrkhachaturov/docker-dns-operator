@@ -1,5 +1,4 @@
-import fs from 'fs';
-import { Injectable, LoggerService } from '@nestjs/common';
+import { Injectable, LoggerService, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { isNumber } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
@@ -10,7 +9,7 @@ import { DnsbaseEntry } from './dto/dnsbase-entry';
 import { DnsaEntry, isDnsAEntry } from './dto/dnsa-entry';
 import { getLogClassDecorator } from './utility.functions';
 import { ConsoleLoggerService } from './logger.service';
-import { CronService, State as CronState } from './cron/cron.service';
+import { State as CronState } from './cron/cron.service';
 import { DdnsService } from './ddns/ddns.service';
 
 let loggerPointer: LoggerService;
@@ -25,24 +24,38 @@ export enum State {
 }
 
 /**
- * Behaviors to initialize the applications services and execute the synchronization between
- * the docker labels and all configured DNS providers.
+ * Drives the reconcile loop. Two triggers:
+ *   1. Docker daemon events (container create/start/stop/die/destroy and, on
+ *      Swarm managers, service create/update/remove) — the primary path.
+ *   2. A long fallback timer (EXECUTION_FREQUENCY_SECONDS) as a safety net
+ *      against missed events and to drive DDNS IP propagation, which has no
+ *      Docker event of its own.
+ *
+ * Both feed a single non-reentrant `scheduleReconcile()` that debounces
+ * (RECONCILE_DEBOUNCE_MS, default 500) to coalesce bursts of events, and
+ * queues exactly one follow-up if events arrive during an in-flight job.
  */
 @LogDecorator()
 @Injectable()
-export class AppService extends CronService {
+export class AppService implements OnModuleDestroy {
   private state = State.Uninitialized;
 
-  /**
-   * ServiceName used in logging present in CronService
-   */
-  // eslint-disable-next-line class-methods-use-this
-  get ServiceName(): string {
-    return AppService.name;
-  }
+  private stopped = false;
+
+  private unsubscribeEvents?: () => void;
+
+  private fallbackTimer?: NodeJS.Timeout;
+
+  private debounceTimer?: NodeJS.Timeout;
+
+  private reconcileInProgress = false;
+
+  private reconcilePending = false;
 
   /**
-   * Fetches the EXECUTION_FREQUENCY_SECONDS
+   * Fetches the EXECUTION_FREQUENCY_SECONDS — the fallback reconcile interval.
+   * Docker events are the primary trigger; this timer is a safety net for
+   * missed events and the only thing that propagates DDNS IP changes.
    */
   get ExecutionFrequencySeconds(): number {
     const executionIntervalSeconds: number | undefined =
@@ -56,14 +69,21 @@ export class AppService extends CronService {
     return executionIntervalSeconds;
   }
 
+  private get reconcileDebounceMs(): number {
+    const ms =
+      this.configService.get<number>('RECONCILE_DEBOUNCE_MS', {
+        infer: true,
+      }) ?? 500;
+    return ms;
+  }
+
   constructor(
     private providerRegistry: ProviderRegistry,
     private dockerService: DockerService,
     private configService: ConfigService,
     private ddnsService: DdnsService,
-    loggerService: ConsoleLoggerService,
+    protected loggerService: ConsoleLoggerService,
   ) {
-    super(loggerService);
     loggerPointer = this.loggerService;
   }
 
@@ -80,6 +100,97 @@ export class AppService extends CronService {
     this.providerRegistry.initialize();
     this.dockerService.initialize();
     this.state = State.Initialized;
+  }
+
+  /**
+   * Start the reactive reconcile loop. Subscribes to Docker events FIRST
+   * (so we don't miss anything that happens during initial sync), then
+   * arms the fallback timer, then schedules the initial reconcile through
+   * the same debouncer all subsequent triggers go through.
+   */
+  async start(): Promise<void> {
+    if (this.stopped)
+      throw new Error('AppService, start: cannot start after stop');
+
+    this.loggerService.log(
+      `AppService: starting reactive reconcile (debounce ${this.reconcileDebounceMs}ms, fallback every ${this.ExecutionFrequencySeconds}s)`,
+    );
+
+    this.unsubscribeEvents = await this.dockerService.subscribeToEvents(() => {
+      this.scheduleReconcile();
+    });
+
+    this.armFallback();
+    this.scheduleReconcile();
+  }
+
+  /**
+   * Tear down the reconcile loop. Safe to call multiple times. After stop,
+   * no further reconciles will be scheduled even if an in-flight job
+   * completes — its post-run drain checks `stopped`.
+   */
+  stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    if (this.unsubscribeEvents) {
+      this.unsubscribeEvents();
+      this.unsubscribeEvents = undefined;
+    }
+    if (this.fallbackTimer) {
+      clearTimeout(this.fallbackTimer);
+      this.fallbackTimer = undefined;
+    }
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = undefined;
+    }
+    this.reconcilePending = false;
+  }
+
+  onModuleDestroy(): void {
+    this.stop();
+  }
+
+  private armFallback(): void {
+    if (this.stopped) return;
+    this.fallbackTimer = setTimeout(() => {
+      this.fallbackTimer = undefined;
+      if (this.stopped) return;
+      this.scheduleReconcile();
+      this.armFallback();
+    }, this.ExecutionFrequencySeconds * 1000);
+  }
+
+  private scheduleReconcile(): void {
+    if (this.stopped) return;
+    if (this.debounceTimer) return;
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = undefined;
+      this.runReconcile();
+    }, this.reconcileDebounceMs);
+  }
+
+  private async runReconcile(): Promise<void> {
+    if (this.stopped) return;
+    if (this.reconcileInProgress) {
+      this.reconcilePending = true;
+      return;
+    }
+    this.reconcileInProgress = true;
+    try {
+      await this.job();
+    } catch (err) {
+      this.loggerService.error(
+        `AppService, runReconcile: job threw, continuing — next trigger will retry`,
+        err instanceof Error ? (err.stack ?? err.message) : String(err),
+      );
+    } finally {
+      this.reconcileInProgress = false;
+      if (!this.stopped && this.reconcilePending) {
+        this.reconcilePending = false;
+        this.scheduleReconcile();
+      }
+    }
   }
 
   /**
@@ -186,25 +297,6 @@ export class AppService extends CronService {
           `[${provider.providerKey}] Synchronisation complete: no changes, Unchanged ${diff.unchanged.length}`,
         );
       }
-    }
-  }
-
-  // Liveness marker for Docker HEALTHCHECK. Writes the current epoch-ms to
-  // LIVENESS_FILE after every cron tick — success OR a caught failure. The
-  // HEALTHCHECK in the operator's Dockerfile compares the file's mtime
-  // against `now` and fails when the gap exceeds ~2× EXECUTION_FREQUENCY.
-  // Disabled when LIVENESS_FILE is empty (default outside of the image).
-  protected onTickComplete(): void {
-    const path = this.configService.get<string>('LIVENESS_FILE', {
-      infer: true,
-    });
-    if (!path) return;
-    try {
-      fs.writeFileSync(path, String(Date.now()));
-    } catch (err) {
-      this.loggerService.warn(
-        `AppService, onTickComplete: failed to write LIVENESS_FILE=${path}: ${err instanceof Error ? err.message : String(err)}`,
-      );
     }
   }
 

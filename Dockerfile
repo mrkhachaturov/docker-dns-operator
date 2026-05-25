@@ -36,12 +36,10 @@ FROM base AS production
 COPY --from=build-results . /home/node/app
 WORKDIR /home/node/app
 ENV NODE_ENV=production
-# Liveness marker file written at the end of every reconciliation tick.
-# The bundled HEALTHCHECK stats this file and fails when its mtime is older
-# than ~2× EXECUTION_FREQUENCY_SECONDS — i.e. the cron loop has stopped
-# ticking. Overridable by the caller; empty string disables the feature.
-ENV LIVENESS_FILE=/tmp/ddo.alive
-EXPOSE 80
+# Liveness endpoint served on HEALTH_PORT (default 9090, same as sidecars).
+# 200 = HTTP server up and event loop responding. Provider/sidecar failures
+# are surfaced through logs, not through this probe.
+EXPOSE 9090
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
-  CMD test $(($(date +%s) - $(stat -c %Y "$LIVENESS_FILE" 2>/dev/null || echo 0))) -lt $((${EXECUTION_FREQUENCY_SECONDS:-60} * 2 + 30)) || exit 1
+  CMD wget -q --spider "http://127.0.0.1:${HEALTH_PORT:-9090}/healthz" || exit 1
 ENTRYPOINT ["node", "main.js"]

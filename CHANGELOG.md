@@ -6,15 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-05-25
+
+Reactive reconcile. The operator stopped polling Docker on a fixed timer and now subscribes to the daemon's event stream — DNS records propagate within ~500 ms of a container start/stop instead of waiting up to a minute. The old fixed-interval timer survives as a slow safety net (and as the DDNS-IP propagation trigger, which has no Docker event).
+
+### Added
+
+- `DockerService.subscribeToEvents(callback)` — long-lived subscription to the Docker daemon's event stream. Filters `container create/start/stop/die/destroy` and, on Swarm managers, additionally `service create/update/remove`. NDJSON line-buffered, auto-reconnects on stream error/end (single reconnect path, 5 s backoff), survives unsubscribe-before-connect via internal state guards.
+- `RECONCILE_DEBOUNCE_MS` env var (Joi range 50–10000, default 500). Coalesces bursts of Docker events (e.g. a `docker stack deploy` creating 10 services at once) into a single reconcile pass.
+- `HEALTH_PORT` env var (default 9090, same as the sidecars) — port the operator's `GET /healthz` listens on.
+- `GET /healthz` HTTP endpoint on the operator. Returns `200 {"status":"ok"}` when the HTTP server is up and the Node event loop is responding — i.e. pure liveness, the same shape `external-dns` exposes (`controller/execute.go::serveMetrics`).
+- Lifecycle tests for the new reactive loop: subscribe-before-initial-sync ordering, event-burst coalescing, follow-up queuing during in-flight job, stop-during-in-flight cleanup, start-after-stop rejection.
+
+### Changed
+
+- **Primary reconcile trigger is now Docker events, not the timer.** `EXECUTION_FREQUENCY_SECONDS` (default 60) survives as the **fallback** interval — safety net for missed events and the only mechanism that propagates DDNS public-IP changes (no Docker event fires for those). Existing deployments need no config change; the timer keeps doing its old job, just less often in practice.
+- `AppService` no longer extends `CronService`. The reconcile loop is built around a non-reentrant, debounced `scheduleReconcile()` fed by both the event stream and the fallback timer. Stop-guards in every callback prevent post-shutdown work. `DdnsService` keeps extending `CronService` unchanged — public-IP polling is genuinely periodic.
+- `main.ts` bootstraps via `NestFactory.create()` + `app.listen(HEALTH_PORT, '0.0.0.0')` instead of the headless `createApplicationContext()` it used in 0.1.2. The operator now actually serves HTTP (the 0.1.2 `EXPOSE 80` was a dead declaration; this release switches to `EXPOSE 9090`).
+- `HEALTHCHECK` in the operator's Dockerfile is now `wget -q --spider http://127.0.0.1:9090/healthz` — mirrors the rfc2136 sidecar's probe shape. Removed the shell-arithmetic file-mtime check used in 0.1.2.
+
+### Removed
+
+- `LIVENESS_FILE` env var and the file-mtime liveness mechanism it backed. The check it implemented ("loop has ticked within `2 × freq + 30s`") conflated process liveness with reconcile success; with the event-driven model, "process alive and HTTP responding" is the honest signal and provider failures already surface in the log + each sidecar's own `/healthz`.
+- `AppService.onTickComplete()` override (and its dependency on `fs`/`stat` semantics).
+- The compose-level healthcheck in 0.1.2's `docker-stack.yml` for the operator that used `stat -c %Y "$LIVENESS_FILE"` — that command silently broke under compose variable interpolation. The new `wget --spider` form has no such trap.
+
+### Fixed
+
+- Operator no longer fails to serve any HTTP at all (a latent 0.1.2 bug: `NestFactory.createApplicationContext` never bound a listener, and the `EXPOSE 80` in the Dockerfile was a misleading hint).
+
 ## [0.1.2] — 2026-05-25
 
 ### Added
+
 - `LIVENESS_FILE` env var (default `/tmp/ddo.alive` inside the image, empty/disabled outside). The reconciler writes the current epoch-ms to this file at the end of every cron tick — success **or** caught failure. Verifies the loop is actually ticking, not just that the process is alive.
 - `HEALTHCHECK` directive in the operator's Dockerfile — file-mtime comparison against `2 × EXECUTION_FREQUENCY_SECONDS + 30s`. Catches hard hangs (event-loop deadlock, OOM, SIGKILL) without flapping on transient sidecar outages.
 - `CronService.onTickComplete()` hook — called once per tick from outside the per-tick try/catch. Subclasses override to plug in liveness markers or metrics; `DdnsService` is unaffected (default no-op).
 - `docker-stack.yml` now ships explicit `healthcheck:` blocks for the operator and all three sidecars, mirroring the image-baked HEALTHCHECK directives. Surfaces in `docker service inspect` and easy to override per environment.
 
 ### Changed
+
 - Bumped submodule pointers to the new sidecar releases:
   - `ddo-rfc2136` → v0.1.1 (file-delivered base64 keytab + principal, baked HEALTHCHECK).
   - `ddo-cloudflare` → v0.1.1 (`webhook healthcheck` subcommand + baked HEALTHCHECK).
@@ -23,6 +54,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [0.1.1] — 2026-05-25
 
 ### Changed
+
 - `PRESERVE_STOPPED` is now honoured in Swarm mode. The operator queries `listServices` with `status: true` and filters services whose `ServiceStatus.RunningTasks` is `0` the same way it filters `exited` containers in standalone mode: included only when `PRESERVE_STOPPED=true`. The standalone-vs-swarm mapping is now consistent — both modes treat a removed workload (`docker rm` / `docker service rm`) as record-drop, and a "deployment exists but not running" state (crash loop, scaled to 0, image pull failure) as governed by `PRESERVE_STOPPED`.
 - Removed the startup warning `"PRESERVE_STOPPED has no effect on a swarm manager"` — the flag is no longer a no-op there.
 
@@ -31,6 +63,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 First tagged release of the sidecar-based architecture.
 
 ### Added
+
 - Generic webhook-provider discovery: every backend is a sidecar registered via a `WEBHOOK_<NAME>_URL` env var. `<NAME>` becomes the provider key (lowercased; underscores → hyphens) referenced from each entry's `providers: [...]` label. Multiple named instances of the same backend (e.g. `mikrotik-home` + `mikrotik-office`, `cf-personal` + `cf-work`) are first-class — declare more env vars, route accordingly.
 - Per-entry routing via the `providers` field on each label entry. Fan-out is strict: a typo in the provider name fails the entry loudly; the operator never guesses.
 - Three reference sidecars shipped as git submodules under [sidecars/](sidecars/):
@@ -45,10 +78,12 @@ First tagged release of the sidecar-based architecture.
 - Joi-validated env schema with clear startup failures on misconfiguration.
 
 ### Changed
+
 - Removed every in-process DNS provider from the operator. Cloudflare, MikroTik, and RFC 2136 implementations now live in their own repos and are addressed only via `WEBHOOK_<NAME>_URL`. The operator side of each provider has shrunk to a single env var.
 - The wire format between operator and sidecar is the [kubernetes-sigs/external-dns webhook provider v1 contract](https://kubernetes-sigs.github.io/external-dns/latest/docs/tutorials/webhook-provider/) — chosen so the same sidecar can serve docker-dns-operator and the upstream external-dns controller interchangeably.
 
 ### Notes
+
 - Forked from [timk153/docker-external-dns](https://github.com/timk153/docker-external-dns); diverged substantially.
 - See [README.md](README.md) for the full configuration reference and examples.
 

@@ -1,5 +1,6 @@
 import { createMock, DeepMocked } from '@golevelup/ts-jest';
 import { Test, TestingModule } from '@nestjs/testing';
+import { PassThrough } from 'stream';
 import Docker from 'dockerode';
 import { ConfigService } from '@nestjs/config';
 import each from 'jest-each';
@@ -832,6 +833,204 @@ describe('DockerService', () => {
           }),
         );
       });
+    });
+  });
+
+  describe('subscribeToEvents', () => {
+    let stream: PassThrough;
+
+    beforeEach(() => {
+      sut['state'] = States.Initialized;
+      // Inject the mocked Docker handle directly so we don't go through
+      // initialize() (the existing initialize tests already cover that).
+      sut['docker'] = mockDockerFactoryGetValue;
+      sut['preserveStopped'] = false;
+      // Shrink reconnect delay for tests so we don't sit on fake timers
+      // longer than we need; the impl exposes this as a private field.
+      sut['reconnectDelayMs'] = 10;
+      stream = new PassThrough();
+      mockDockerFactoryGetValue.getEvents = jest.fn().mockResolvedValue(stream);
+    });
+
+    afterEach(() => {
+      if (stream && !stream.destroyed) stream.destroy();
+    });
+
+    const flushMicrotasks = async () => {
+      // Two ticks: one for resolveSwarmMode (when called), one for getEvents.
+      await new Promise((resolve) => {
+        setImmediate(resolve);
+      });
+      await new Promise((resolve) => {
+        setImmediate(resolve);
+      });
+    };
+
+    it('opens an events stream with container-only filters in container mode', async () => {
+      sut['swarmMode'] = false;
+      const callback = jest.fn();
+
+      const unsubscribe = await sut.subscribeToEvents(callback);
+      await flushMicrotasks();
+
+      expect(mockDockerFactoryGetValue.getEvents).toHaveBeenCalledTimes(1);
+      const arg = (mockDockerFactoryGetValue.getEvents as jest.Mock).mock
+        .calls[0][0];
+      const filters = JSON.parse(arg.filters);
+      expect(filters.type).toEqual(['container']);
+      expect(filters.event).toEqual(
+        expect.arrayContaining(['create', 'start', 'stop', 'die', 'destroy']),
+      );
+      unsubscribe();
+    });
+
+    it('adds service events to the filter in swarm-manager mode', async () => {
+      sut['swarmMode'] = true;
+      const callback = jest.fn();
+
+      const unsubscribe = await sut.subscribeToEvents(callback);
+      await flushMicrotasks();
+
+      const arg = (mockDockerFactoryGetValue.getEvents as jest.Mock).mock
+        .calls[0][0];
+      const filters = JSON.parse(arg.filters);
+      expect(filters.type).toEqual(
+        expect.arrayContaining(['container', 'service']),
+      );
+      expect(filters.event).toEqual(
+        expect.arrayContaining(['create', 'update', 'remove']),
+      );
+      unsubscribe();
+    });
+
+    it('invokes the callback once per newline-delimited JSON event', async () => {
+      sut['swarmMode'] = false;
+      const callback = jest.fn();
+      const unsubscribe = await sut.subscribeToEvents(callback);
+      await flushMicrotasks();
+
+      stream.write('{"Type":"container","Action":"start"}\n');
+      stream.write('{"Type":"container","Action":"die"}\n');
+      await flushMicrotasks();
+
+      expect(callback).toHaveBeenCalledTimes(2);
+      unsubscribe();
+    });
+
+    it('buffers events split across chunk boundaries', async () => {
+      sut['swarmMode'] = false;
+      const callback = jest.fn();
+      const unsubscribe = await sut.subscribeToEvents(callback);
+      await flushMicrotasks();
+
+      stream.write('{"Type":"container","Action":"start"}\n{"Type":"con');
+      stream.write('tainer","Action":"die"}\n');
+      await flushMicrotasks();
+
+      expect(callback).toHaveBeenCalledTimes(2);
+      unsubscribe();
+    });
+
+    it('reconnects after a stream error', async () => {
+      sut['swarmMode'] = false;
+      const callback = jest.fn();
+      const unsubscribe = await sut.subscribeToEvents(callback);
+      await flushMicrotasks();
+
+      const stream2 = new PassThrough();
+      (mockDockerFactoryGetValue.getEvents as jest.Mock).mockResolvedValueOnce(
+        stream2,
+      );
+
+      stream.emit('error', new Error('boom'));
+      // wait for the reconnect timer (10ms) + microtasks
+      await new Promise((resolve) => {
+        setTimeout(resolve, 30);
+      });
+      await flushMicrotasks();
+
+      expect(mockDockerFactoryGetValue.getEvents).toHaveBeenCalledTimes(2);
+      unsubscribe();
+      stream2.destroy();
+    });
+
+    it('schedules only one reconnect when both error and end fire', async () => {
+      sut['swarmMode'] = false;
+      const callback = jest.fn();
+      const unsubscribe = await sut.subscribeToEvents(callback);
+      await flushMicrotasks();
+
+      const stream2 = new PassThrough();
+      (mockDockerFactoryGetValue.getEvents as jest.Mock).mockResolvedValueOnce(
+        stream2,
+      );
+
+      stream.emit('error', new Error('boom'));
+      stream.emit('end');
+      await new Promise((resolve) => {
+        setTimeout(resolve, 30);
+      });
+      await flushMicrotasks();
+
+      expect(mockDockerFactoryGetValue.getEvents).toHaveBeenCalledTimes(2);
+      unsubscribe();
+      stream2.destroy();
+    });
+
+    it('stops invoking the callback after unsubscribe', async () => {
+      sut['swarmMode'] = false;
+      const callback = jest.fn();
+      const unsubscribe = await sut.subscribeToEvents(callback);
+      await flushMicrotasks();
+      unsubscribe();
+
+      stream.write('{"Type":"container","Action":"start"}\n');
+      await flushMicrotasks();
+
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it('handles unsubscribe before the connect promise resolves', async () => {
+      sut['swarmMode'] = false;
+      // Hold getEvents pending so we can unsubscribe in the gap
+      let resolveStream: (s: any) => void = () => {};
+      const pending = new Promise((resolve) => {
+        resolveStream = resolve;
+      });
+      (mockDockerFactoryGetValue.getEvents as jest.Mock).mockReturnValueOnce(
+        pending,
+      );
+      const callback = jest.fn();
+
+      const unsubscribe = await sut.subscribeToEvents(callback);
+      unsubscribe();
+      resolveStream(stream);
+      await flushMicrotasks();
+
+      stream.write('{"Type":"container","Action":"start"}\n');
+      await flushMicrotasks();
+
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it('retries the initial connect when docker.getEvents rejects', async () => {
+      sut['swarmMode'] = false;
+      (mockDockerFactoryGetValue.getEvents as jest.Mock)
+        .mockRejectedValueOnce(new Error('socket dead'))
+        .mockResolvedValueOnce(stream);
+
+      const callback = jest.fn();
+      const unsubscribe = await sut.subscribeToEvents(callback);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 30);
+      });
+      await flushMicrotasks();
+
+      expect(mockDockerFactoryGetValue.getEvents).toHaveBeenCalledTimes(2);
+      stream.write('{"Type":"container","Action":"start"}\n');
+      await flushMicrotasks();
+      expect(callback).toHaveBeenCalledTimes(1);
+      unsubscribe();
     });
   });
 });

@@ -1,6 +1,3 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import { Test, TestingModule } from '@nestjs/testing';
 import { createMock, DeepMocked } from '@golevelup/ts-jest';
 import { AppService, State } from './app.service';
@@ -275,67 +272,134 @@ describe('AppService', () => {
     });
   });
 
-  describe('onTickComplete (liveness marker)', () => {
-    let livenessPath: string;
+  describe('reactive lifecycle (start/stop)', () => {
+    // Captures the callback handed to dockerService.subscribeToEvents so we
+    // can fire synthetic events from tests.
+    let eventCallback: () => void;
+    let unsubscribeSpy: jest.Mock;
+    // Waits long enough for the 5 ms debounce timer to fire and the
+    // resulting async job to settle. Microtask-only flushes are not enough
+    // — debounce uses real setTimeout.
+    const waitDebounce = (extraMs = 20) =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, extraMs);
+      });
 
     beforeEach(() => {
-      livenessPath = path.join(
-        os.tmpdir(),
-        `ddo-alive-${process.pid}-${Date.now()}`,
+      sut['state'] = State.Initialized;
+      // Job is a no-op for these tests — we're verifying the scheduler,
+      // not the reconcile semantics (those have their own describe blocks).
+      jest.spyOn(sut, 'job').mockResolvedValue(undefined);
+      unsubscribeSpy = jest.fn();
+      mockDockerService.subscribeToEvents.mockImplementation(async (cb) => {
+        eventCallback = cb;
+        return unsubscribeSpy;
+      });
+      // Use a real, tiny debounce so tests don't sit on fake timers.
+      (sut['configService'].get as jest.Mock).mockImplementation(
+        (key: string) => {
+          if (key === 'EXECUTION_FREQUENCY_SECONDS') return 999_999;
+          if (key === 'RECONCILE_DEBOUNCE_MS') return 5;
+          return undefined;
+        },
       );
     });
 
     afterEach(() => {
-      try {
-        fs.unlinkSync(livenessPath);
-      } catch {
-        // ignore — file may not exist
-      }
+      sut.stop();
     });
 
-    it('writes current timestamp to LIVENESS_FILE on tick complete', () => {
-      const mockConfig = sut['configService'];
-      (mockConfig.get as jest.Mock).mockReturnValueOnce(livenessPath);
+    it('subscribes to docker events before scheduling the initial reconcile', async () => {
+      await sut.start();
 
-      const before = Date.now();
-      sut['onTickComplete']();
-      const after = Date.now();
-
-      const content = fs.readFileSync(livenessPath, 'utf8');
-      const ts = Number(content);
-      expect(ts).toBeGreaterThanOrEqual(before);
-      expect(ts).toBeLessThanOrEqual(after);
+      expect(mockDockerService.subscribeToEvents).toHaveBeenCalledTimes(1);
+      // initial reconcile is queued through the debouncer, not executed yet
+      expect(sut.job).not.toHaveBeenCalled();
     });
 
-    it('is a no-op when LIVENESS_FILE is empty', () => {
-      const mockConfig = sut['configService'];
-      (mockConfig.get as jest.Mock).mockReturnValueOnce('');
+    it('runs the initial reconcile after the debounce window', async () => {
+      await sut.start();
+      await waitDebounce();
 
-      sut['onTickComplete']();
-
-      expect(fs.existsSync(livenessPath)).toBe(false);
+      expect(sut.job).toHaveBeenCalledTimes(1);
     });
 
-    it('writes regardless of tick outcome (invoked outside the per-tick catch)', () => {
-      const mockConfig = sut['configService'];
-      (mockConfig.get as jest.Mock).mockReturnValueOnce(livenessPath);
+    it('coalesces a burst of events into a single reconcile', async () => {
+      await sut.start();
+      // Burst — all within the debounce window
+      eventCallback();
+      eventCallback();
+      eventCallback();
+      eventCallback();
+      eventCallback();
+      await waitDebounce();
 
-      sut['onTickComplete']();
-
-      expect(fs.existsSync(livenessPath)).toBe(true);
+      // 1 reconcile total (initial + burst all coalesced)
+      expect(sut.job).toHaveBeenCalledTimes(1);
     });
 
-    it('warns but does not throw if write fails', () => {
-      const mockConfig = sut['configService'];
-      (mockConfig.get as jest.Mock).mockReturnValueOnce(
-        '/nonexistent-dir-12345/ddo.alive',
-      );
-      const warn = sut['loggerService'].warn as jest.Mock;
+    it('queues exactly one follow-up reconcile if an event arrives during an in-flight job', async () => {
+      // Hold the in-flight job until we release it
+      let releaseJob: () => void = () => {};
+      const jobPromise = new Promise<void>((resolve) => {
+        releaseJob = resolve;
+      });
+      (sut.job as jest.Mock).mockReturnValueOnce(jobPromise);
 
-      expect(() => sut['onTickComplete']()).not.toThrow();
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('failed to write LIVENESS_FILE'),
-      );
+      await sut.start();
+      // Wait for the initial reconcile to enter "in-progress"
+      await waitDebounce();
+      expect(sut.job).toHaveBeenCalledTimes(1);
+
+      // Fire multiple events while the job is still running
+      eventCallback();
+      eventCallback();
+      eventCallback();
+
+      // Let the initial job finish
+      releaseJob();
+      await waitDebounce();
+
+      // One initial run + exactly one follow-up = 2
+      expect(sut.job).toHaveBeenCalledTimes(2);
+    });
+
+    it('stop() unsubscribes from events and clears timers', async () => {
+      await sut.start();
+      sut.stop();
+
+      expect(unsubscribeSpy).toHaveBeenCalledTimes(1);
+      // After stop, further events must not schedule reconciles
+      eventCallback();
+      await waitDebounce();
+      expect(sut.job).not.toHaveBeenCalled();
+    });
+
+    it('stop() during an in-flight job prevents the queued follow-up from running', async () => {
+      let releaseJob: () => void = () => {};
+      const jobPromise = new Promise<void>((resolve) => {
+        releaseJob = resolve;
+      });
+      (sut.job as jest.Mock).mockReturnValueOnce(jobPromise);
+
+      await sut.start();
+      await waitDebounce();
+      expect(sut.job).toHaveBeenCalledTimes(1);
+
+      // Queue a follow-up by firing an event mid-job
+      eventCallback();
+      // Stop while the in-flight job is still running
+      sut.stop();
+      releaseJob();
+      await waitDebounce();
+
+      // No follow-up ran — only the initial in-flight job
+      expect(sut.job).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws if start() is called after stop()', async () => {
+      sut.stop();
+      await expect(sut.start()).rejects.toThrow('cannot start after stop');
     });
   });
 });

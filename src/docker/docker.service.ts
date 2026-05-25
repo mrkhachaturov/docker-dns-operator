@@ -1,4 +1,5 @@
 import { Inject, Injectable, LoggerService } from '@nestjs/common';
+import type { Readable } from 'stream';
 import Docker from 'dockerode';
 import { ConfigService } from '@nestjs/config';
 import { validateSync } from 'class-validator';
@@ -55,6 +56,11 @@ export class DockerService {
   // Resolved lazily on the first getSources() call. undefined = not yet
   // resolved; true/false = the result of explicit env or auto-detect.
   private swarmMode?: boolean;
+
+  // Backoff between event-stream reconnect attempts. Exposed as a field so
+  // tests can shrink it without sleeping for real seconds. Production uses 5 s,
+  // mirroring the upstream Docker SDK reference implementation.
+  private reconnectDelayMs = 5000;
 
   private state = States.Unintialized;
 
@@ -229,6 +235,169 @@ export class DockerService {
         error,
       );
     }
+  }
+
+  /**
+   * Subscribe to Docker daemon events that may have changed the set of
+   * labelled containers/services. The callback is invoked once per event
+   * (no arguments — the caller is expected to re-scan via getSources).
+   *
+   * Filters mirror the upstream Docker SDK reference pattern: container
+   * create/start/stop/die/destroy, plus service create/update/remove when
+   * we're a Swarm manager. We deliberately do NOT label-filter the stream
+   * — a missed destroy event because the label was already gone is worse
+   * than the cost of an extra reconcile pass.
+   *
+   * Robust to:
+   *  - long-lived stream errors / end (auto-reconnects after reconnectDelayMs;
+   *    coalesces concurrent error+end into a single reconnect)
+   *  - getEvents() rejection (treated like a stream error)
+   *  - unsubscribe before the initial connect resolves (aborts cleanly)
+   *  - NDJSON chunks split across or merged in transport (line-buffered)
+   *
+   * @returns An unsubscribe function. Idempotent.
+   */
+  async subscribeToEvents(callback: () => void): Promise<() => void> {
+    if (this.state !== States.Initialized)
+      throw new Error(
+        'DockerService, subscribeToEvents: not initialized, must call initialize',
+      );
+
+    const state = {
+      stopped: false,
+      currentStream: undefined as Readable | undefined,
+      reconnectTimer: undefined as NodeJS.Timeout | undefined,
+    };
+
+    const scheduleReconnect = (): void => {
+      if (state.stopped || state.reconnectTimer) return;
+      state.reconnectTimer = setTimeout(() => {
+        state.reconnectTimer = undefined;
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
+        connect();
+      }, this.reconnectDelayMs);
+    };
+
+    const parseLine = (line: string): void => {
+      if (line.trim().length === 0) return;
+      try {
+        JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (state.stopped) return;
+      try {
+        callback();
+      } catch (err) {
+        this.loggerService.warn(
+          `DockerService, subscribeToEvents: callback threw: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    };
+
+    const connect = async (): Promise<void> => {
+      if (state.stopped) return;
+
+      let filters: { type: string[]; event: string[] };
+      try {
+        const swarm = await this.resolveSwarmMode();
+        if (state.stopped) return;
+        filters = swarm
+          ? {
+              type: ['container', 'service'],
+              event: [
+                'create',
+                'start',
+                'stop',
+                'die',
+                'destroy',
+                'update',
+                'remove',
+              ],
+            }
+          : {
+              type: ['container'],
+              event: ['create', 'start', 'stop', 'die', 'destroy'],
+            };
+      } catch (err) {
+        this.loggerService.warn(
+          `DockerService, subscribeToEvents: swarm-mode probe failed, retrying in ${this.reconnectDelayMs}ms: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        scheduleReconnect();
+        return;
+      }
+
+      let stream: Readable;
+      try {
+        stream = (await this.docker.getEvents({
+          filters: JSON.stringify(filters),
+        })) as unknown as Readable;
+      } catch (err) {
+        if (state.stopped) return;
+        this.loggerService.warn(
+          `DockerService, subscribeToEvents: failed to open events stream, retrying in ${this.reconnectDelayMs}ms: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        scheduleReconnect();
+        return;
+      }
+
+      if (state.stopped) {
+        stream.destroy();
+        return;
+      }
+
+      state.currentStream = stream;
+      let buffer = '';
+      let reconnectArmed = false;
+      const armReconnect = (cause: string): void => {
+        if (reconnectArmed || state.stopped) return;
+        reconnectArmed = true;
+        this.loggerService.warn(
+          `DockerService, subscribeToEvents: event stream ${cause}, reconnecting in ${this.reconnectDelayMs}ms`,
+        );
+        state.currentStream = undefined;
+        scheduleReconnect();
+      };
+
+      stream.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString('utf8');
+        let nl = buffer.indexOf('\n');
+        while (nl >= 0) {
+          parseLine(buffer.slice(0, nl));
+          buffer = buffer.slice(nl + 1);
+          nl = buffer.indexOf('\n');
+        }
+      });
+      stream.on('error', (err: Error) => {
+        armReconnect(`errored (${err.message})`);
+      });
+      stream.on('end', () => {
+        armReconnect('ended');
+      });
+    };
+
+    // Fire-and-forget the initial connect so unsubscribe is available
+    // synchronously to the caller.
+    connect();
+
+    return () => {
+      if (state.stopped) return;
+      state.stopped = true;
+      if (state.reconnectTimer) {
+        clearTimeout(state.reconnectTimer);
+        state.reconnectTimer = undefined;
+      }
+      if (state.currentStream) {
+        state.currentStream.destroy();
+        state.currentStream = undefined;
+      }
+    };
   }
 
   /**

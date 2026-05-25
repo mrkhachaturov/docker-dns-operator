@@ -7,6 +7,7 @@ import { ConsoleLoggerService } from './logger.service';
 import { DdnsService } from './ddns/ddns.service';
 import { ProviderRegistry } from './providers/provider-registry.service';
 import { buildWebhookProviders } from './webhook-provider/registry';
+import { HealthController } from './health/health.controller';
 
 /**
  * Module that registers all the services and factories for the application.
@@ -15,6 +16,7 @@ import { buildWebhookProviders } from './webhook-provider/registry';
  * env vars. The operator no longer carries an in-process DNS implementation.
  */
 @Module({
+  controllers: [HealthController],
   providers: [
     DockerService,
     DockerFactory,

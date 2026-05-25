@@ -17,7 +17,7 @@
 
 services:
   docker-dns-operator:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.0
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
     build: ../..
     depends_on:
       - ddo-rfc2136
@@ -26,15 +26,18 @@ services:
       PROJECT_LABEL: docker-dns-operator
       INSTANCE_ID: rfc2136-example
       EXECUTION_FREQUENCY_SECONDS: 30
+      # Coalesce bursts of Docker events (e.g. a compose up creating many
+      # services at once) into a single reconcile. Range 50–10000.
+      RECONCILE_DEBOUNCE_MS: 500
       WEBHOOK_RFC2136_URL: http://ddo-rfc2136:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   ddo-rfc2136:
-    image: ghcr.io/mrkhachaturov/ddo-rfc2136:0.1.0
+    image: ghcr.io/mrkhachaturov/ddo-rfc2136:0.1.1
     build: ../../sidecars/ddo-rfc2136
     environment:
-      WEBHOOK_LISTEN: ":9090"
+      WEBHOOK_LISTEN: ':9090'
       RFC2136_HOSTS: ${RFC2136_HOSTS:?set RFC2136_HOSTS in .env}
       RFC2136_ZONES: ${RFC2136_ZONES:?set RFC2136_ZONES in .env}
       RFC2136_KERBEROS_REALM: ${RFC2136_KERBEROS_REALM:?set RFC2136_KERBEROS_REALM in .env}
