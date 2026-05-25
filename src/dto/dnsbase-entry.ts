@@ -24,10 +24,10 @@ export interface IProviderOptions {
 
 export abstract class DnsbaseEntry {
   @IsEnum(DNSTypes)
-  type: DNSTypes;
+  type!: DNSTypes;
 
   @IsFQDN()
-  name: string;
+  name!: string;
 
   /**
    * Normalized list of provider keys this entry targets.

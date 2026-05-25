@@ -13,7 +13,7 @@ import { NestedError } from '../errors/nested-error';
 import { DockerFactory } from './docker.factory';
 import { DnsaEntry } from '../dto/dnsa-entry';
 import { DnsAaaaEntry } from '../dto/dnsaaaa-entry';
-import { DnsBaseCloudflareEntry } from '../dto/dnsbase-entry.spec';
+import { DnsBaseCloudflareEntry } from '../dto/dnsbase-cloudflare-entry';
 import { getLogClassDecorator } from '../utility.functions';
 import {
   normalizeProviders,
@@ -43,11 +43,14 @@ export enum States {
 @LogDecorator()
 @Injectable()
 export class DockerService {
-  private docker: Docker;
+  // Set in initialize() before any other method may legally run; the state
+  // guard above each public method enforces it. The definite-assignment
+  // assertion lets the compiler trust that contract.
+  private docker!: Docker;
 
-  private dockerLabel: string;
+  private dockerLabel!: string;
 
-  private preserveStopped: boolean;
+  private preserveStopped!: boolean;
 
   // Resolved lazily on the first getSources() call. undefined = not yet
   // resolved; true/false = the result of explicit env or auto-detect.

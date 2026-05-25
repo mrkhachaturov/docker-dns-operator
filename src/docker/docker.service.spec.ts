@@ -28,7 +28,7 @@ jest.mock('@nestjs/common', () => {
 class ContainerInfoBuilder<T extends DnsbaseEntry> {
   labelValues: T[] = [];
 
-  idValue: string;
+  idValue!: string;
 
   constructor(private dockerLabel: string) {}
 

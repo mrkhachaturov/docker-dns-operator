@@ -5,7 +5,7 @@ export class DnsAaaaEntry extends DnsbaseEntry {
   type = DNSTypes.AAAA;
 
   @IsIP(6)
-  address: string;
+  address!: string;
 
   hasSameValue(otherEntry: DnsAaaaEntry): boolean {
     return this.address.toLowerCase() === otherEntry.address.toLowerCase();

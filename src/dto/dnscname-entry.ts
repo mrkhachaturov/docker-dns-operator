@@ -3,7 +3,7 @@ import { DnsbaseEntry, DNSTypes, IHasDnsType } from './dnsbase-entry';
 
 export class DnsCnameEntry extends DnsbaseEntry {
   @IsFQDN()
-  target: string;
+  target!: string;
 
   hasSameValue(otherEntry: DnsCnameEntry): boolean {
     return this.target === otherEntry.target;

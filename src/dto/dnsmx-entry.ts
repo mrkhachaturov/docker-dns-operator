@@ -10,7 +10,7 @@ export class DnsMxEntry extends DnsbaseEntry {
    * e.g. mx1.testdomain.com
    */
   @IsFQDN()
-  server: string;
+  server!: string;
 
   /**
    * The priority number of this MX record entry.
@@ -19,7 +19,7 @@ export class DnsMxEntry extends DnsbaseEntry {
   @IsInt()
   @Min(0)
   @Max(65535)
-  priority: number;
+  priority!: number;
 
   /**
    * Determines if another MX Entry has the same values as this one.

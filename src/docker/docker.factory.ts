@@ -10,7 +10,10 @@ const LogDecorator = getLogClassDecorator(() => loggerPointer);
 @LogDecorator()
 @Injectable()
 export class DockerFactory {
-  private docker: Docker;
+  // Lazily assigned on the first get(); the truthy guard in get() makes the
+  // "is initialised" check explicit, so the definite-assignment assertion
+  // matches reality here.
+  private docker!: Docker;
 
   constructor(private loggerService: ConsoleLoggerService) {
     loggerPointer = this.loggerService;

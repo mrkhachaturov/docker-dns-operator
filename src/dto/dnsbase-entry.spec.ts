@@ -2,13 +2,6 @@ import each from 'jest-each';
 import { validate } from 'class-validator';
 import { DnsbaseEntry, DNSTypes } from './dnsbase-entry';
 
-export type DnsBaseCloudflareEntry = {
-  zoneId: string;
-  id: string;
-  name: string;
-  type: DNSTypes;
-};
-
 class MockDnsEntry extends DnsbaseEntry {
   // implemented because it's required, but not used or tested in this suite.
   // hence the reasons for the diabling comments

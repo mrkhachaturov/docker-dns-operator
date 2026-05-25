@@ -11,7 +11,7 @@ export class DnsNsEntry extends DnsbaseEntry {
    * e.g. ns1.testdomain.com
    */
   @IsFQDN()
-  server: string;
+  server!: string;
 
   /**
    * Determines if another DnsNsEntry has the same values as this one.

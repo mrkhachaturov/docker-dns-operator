@@ -4,7 +4,7 @@ import { IsIPOrDDNS } from '../validators/iporddns.validator';
 
 export class DnsaEntry extends DnsbaseEntry {
   @Validate(IsIPOrDDNS)
-  address: string;
+  address!: string;
 
   /**
    * Provider-neutral comparison — only checks address.
