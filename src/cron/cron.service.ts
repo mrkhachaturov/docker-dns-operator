@@ -75,6 +75,22 @@ export abstract class CronService implements OnModuleDestroy {
         err instanceof Error ? (err.stack ?? err.message) : String(err),
       );
     }
+    try {
+      this.onTickComplete();
+    } catch (err) {
+      this.loggerService.warn(
+        `CronService (${this.ServiceName}): onTickComplete hook threw, ignored: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // Hook invoked after every tick — success OR caught failure. Default: no-op.
+  // Subclasses override to plug in liveness markers or metrics. Called from
+  // outside the per-tick try/catch deliberately: "operator's loop is alive"
+  // is the signal we want, not "every provider succeeded on this tick".
+  // eslint-disable-next-line class-methods-use-this
+  protected onTickComplete(): void {
+    // no-op by default
   }
 
   /**

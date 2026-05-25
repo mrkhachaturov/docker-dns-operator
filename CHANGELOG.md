@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-05-25
+
+### Added
+- `LIVENESS_FILE` env var (default `/tmp/ddo.alive` inside the image, empty/disabled outside). The reconciler writes the current epoch-ms to this file at the end of every cron tick — success **or** caught failure. Verifies the loop is actually ticking, not just that the process is alive.
+- `HEALTHCHECK` directive in the operator's Dockerfile — file-mtime comparison against `2 × EXECUTION_FREQUENCY_SECONDS + 30s`. Catches hard hangs (event-loop deadlock, OOM, SIGKILL) without flapping on transient sidecar outages.
+- `CronService.onTickComplete()` hook — called once per tick from outside the per-tick try/catch. Subclasses override to plug in liveness markers or metrics; `DdnsService` is unaffected (default no-op).
+- `docker-stack.yml` now ships explicit `healthcheck:` blocks for the operator and all three sidecars, mirroring the image-baked HEALTHCHECK directives. Surfaces in `docker service inspect` and easy to override per environment.
+
+### Changed
+- Bumped submodule pointers to the new sidecar releases:
+  - `ddo-rfc2136` → v0.1.1 (file-delivered base64 keytab + principal, baked HEALTHCHECK).
+  - `ddo-cloudflare` → v0.1.1 (`webhook healthcheck` subcommand + baked HEALTHCHECK).
+  - `ddo-mikrotik` → v0.1.1 (same shape as cloudflare).
+
 ## [0.1.1] — 2026-05-25
 
 ### Changed
@@ -38,6 +52,7 @@ First tagged release of the sidecar-based architecture.
 - Forked from [timk153/docker-external-dns](https://github.com/timk153/docker-external-dns); diverged substantially.
 - See [README.md](README.md) for the full configuration reference and examples.
 
-[Unreleased]: https://github.com/mrkhachaturov/docker-dns-operator/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/mrkhachaturov/docker-dns-operator/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/mrkhachaturov/docker-dns-operator/releases/tag/v0.1.2
 [0.1.1]: https://github.com/mrkhachaturov/docker-dns-operator/releases/tag/v0.1.1
 [0.1.0]: https://github.com/mrkhachaturov/docker-dns-operator/releases/tag/v0.1.0

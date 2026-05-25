@@ -24,6 +24,12 @@ export const validationSchema = Joi.object({
     .empty('')
     .default(60),
   PRESERVE_STOPPED: Joi.boolean().default(false),
+
+  // Liveness marker file — touched at the end of every reconciliation tick
+  // (success or caught failure). Empty string (the default) disables the
+  // feature. The Dockerfile sets a path so the bundled HEALTHCHECK has
+  // something to stat without requiring caller configuration.
+  LIVENESS_FILE: Joi.string().allow('').default(''),
   // Swarm vs container mode is auto-detected at runtime from `docker info`;
   // no env var. See DockerService.resolveSwarmMode().
 
@@ -75,5 +81,6 @@ export interface IConfiguration {
   INSTANCE_ID: string;
   ENTRY_IDENTIFIER: string;
   PRESERVE_STOPPED: boolean;
+  LIVENESS_FILE: string;
   WEBHOOK_TIMEOUT_SECONDS: number;
 }

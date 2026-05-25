@@ -1,3 +1,6 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { Test, TestingModule } from '@nestjs/testing';
 import { createMock, DeepMocked } from '@golevelup/ts-jest';
 import { AppService, State } from './app.service';
@@ -269,6 +272,70 @@ describe('AppService', () => {
         expect(mockCfProvider.createEntry).toHaveBeenCalledWith(all);
         expect(mockCfProvider.createEntry).toHaveBeenCalledWith(targeted);
       });
+    });
+  });
+
+  describe('onTickComplete (liveness marker)', () => {
+    let livenessPath: string;
+
+    beforeEach(() => {
+      livenessPath = path.join(
+        os.tmpdir(),
+        `ddo-alive-${process.pid}-${Date.now()}`,
+      );
+    });
+
+    afterEach(() => {
+      try {
+        fs.unlinkSync(livenessPath);
+      } catch {
+        // ignore — file may not exist
+      }
+    });
+
+    it('writes current timestamp to LIVENESS_FILE on tick complete', () => {
+      const mockConfig = sut['configService'];
+      (mockConfig.get as jest.Mock).mockReturnValueOnce(livenessPath);
+
+      const before = Date.now();
+      sut['onTickComplete']();
+      const after = Date.now();
+
+      const content = fs.readFileSync(livenessPath, 'utf8');
+      const ts = Number(content);
+      expect(ts).toBeGreaterThanOrEqual(before);
+      expect(ts).toBeLessThanOrEqual(after);
+    });
+
+    it('is a no-op when LIVENESS_FILE is empty', () => {
+      const mockConfig = sut['configService'];
+      (mockConfig.get as jest.Mock).mockReturnValueOnce('');
+
+      sut['onTickComplete']();
+
+      expect(fs.existsSync(livenessPath)).toBe(false);
+    });
+
+    it('writes regardless of tick outcome (invoked outside the per-tick catch)', () => {
+      const mockConfig = sut['configService'];
+      (mockConfig.get as jest.Mock).mockReturnValueOnce(livenessPath);
+
+      sut['onTickComplete']();
+
+      expect(fs.existsSync(livenessPath)).toBe(true);
+    });
+
+    it('warns but does not throw if write fails', () => {
+      const mockConfig = sut['configService'];
+      (mockConfig.get as jest.Mock).mockReturnValueOnce(
+        '/nonexistent-dir-12345/ddo.alive',
+      );
+      const warn = sut['loggerService'].warn as jest.Mock;
+
+      expect(() => sut['onTickComplete']()).not.toThrow();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('failed to write LIVENESS_FILE'),
+      );
     });
   });
 });

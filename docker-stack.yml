@@ -22,6 +22,11 @@
 # Build any local image first with `docker compose build` against the
 # matching docker-compose.yml.
 
+# Each image ships its own Dockerfile HEALTHCHECK. The explicit compose-level
+# `healthcheck:` blocks below mirror those defaults so they show up in
+# `docker service inspect` and are easy to override per environment. Swarm
+# does NOT honour `depends_on: condition: service_healthy` — these are for
+# observability and `docker service ps` reporting, not start ordering.
 services:
   docker-dns-operator:
     image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.0
@@ -35,6 +40,14 @@ services:
       WEBHOOK_RFC2136_URL: http://ddo-rfc2136:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      # File-mtime liveness: the reconciler touches LIVENESS_FILE each tick.
+      # Threshold is 2× EXECUTION_FREQUENCY_SECONDS + 30s slack.
+      test: ["CMD-SHELL", "test $(($(date +%s) - $(stat -c %Y \"$LIVENESS_FILE\" 2>/dev/null || echo 0))) -lt $((${EXECUTION_FREQUENCY_SECONDS:-60} * 2 + 30))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 45s
+      retries: 3
     deploy:
       placement:
         constraints:
@@ -50,6 +63,14 @@ services:
       CLOUDFLARE_ZONES: ${CF_ZONES:-}
       CLOUDFLARE_DEFAULT_TTL: ${CF_DEFAULT_TTL:-1}
       # Proxy state is per-record via providerOptions.cf.proxy label.
+    healthcheck:
+      # Distroless: no shell. The webhook binary doubles as its own probe via
+      # the `healthcheck` subcommand — exit 0 iff GET /healthz returns 2xx.
+      test: ["CMD", "/usr/local/bin/webhook", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     deploy:
       restart_policy:
         condition: on-failure
@@ -64,6 +85,12 @@ services:
       MIKROTIK_USE_TLS: ${MIKROTIK_USE_TLS:-false}
       MIKROTIK_SKIP_TLS_VERIFY: ${MIKROTIK_SKIP_TLS_VERIFY:-false}
       MIKROTIK_ZONES: ${MIKROTIK_ZONES:-}
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/webhook", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     deploy:
       placement:
         constraints:
@@ -86,6 +113,13 @@ services:
     configs:
       - source: krb5_conf
         target: /etc/krb5.conf
+    healthcheck:
+      # Alpine base — busybox wget probes /healthz (Kerberos TGT freshness).
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9090/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     deploy:
       placement:
         constraints:

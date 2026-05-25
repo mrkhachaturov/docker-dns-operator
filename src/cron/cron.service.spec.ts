@@ -127,10 +127,12 @@ describe('CronService', () => {
 
       // assert
       expect(spyJob).toHaveBeenCalledTimes(2);
-      // verbose is fired by the @LogDecorator wrapper. Two decorated paths run:
-      //   start()         → 1
-      //   runJobSafely() x2 (initial + tick) → 2
-      expect(mockConsoleLoggerService.verbose).toHaveBeenCalledTimes(3);
+      // verbose is fired by the @LogDecorator wrapper. Decorated methods that
+      // run during start() + one queued tick:
+      //   start()             → 1
+      //   runJobSafely() x2   → 2 (initial + queued tick)
+      //   onTickComplete() x2 → 2 (one per runJobSafely, even on success)
+      expect(mockConsoleLoggerService.verbose).toHaveBeenCalledTimes(5);
       expect(mockSetTimeout).toHaveBeenCalledTimes(1);
       expect(mockSetTimeout).toHaveBeenCalledWith(
         expect.any(Function),

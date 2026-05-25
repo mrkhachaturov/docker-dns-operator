@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { Injectable, LoggerService } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { isNumber } from 'class-validator';
@@ -185,6 +186,25 @@ export class AppService extends CronService {
           `[${provider.providerKey}] Synchronisation complete: no changes, Unchanged ${diff.unchanged.length}`,
         );
       }
+    }
+  }
+
+  // Liveness marker for Docker HEALTHCHECK. Writes the current epoch-ms to
+  // LIVENESS_FILE after every cron tick — success OR a caught failure. The
+  // HEALTHCHECK in the operator's Dockerfile compares the file's mtime
+  // against `now` and fails when the gap exceeds ~2× EXECUTION_FREQUENCY.
+  // Disabled when LIVENESS_FILE is empty (default outside of the image).
+  protected onTickComplete(): void {
+    const path = this.configService.get<string>('LIVENESS_FILE', {
+      infer: true,
+    });
+    if (!path) return;
+    try {
+      fs.writeFileSync(path, String(Date.now()));
+    } catch (err) {
+      this.loggerService.warn(
+        `AppService, onTickComplete: failed to write LIVENESS_FILE=${path}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
