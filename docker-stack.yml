@@ -40,7 +40,7 @@ services:
         condition: on-failure
 
   ddo-cloudflare:
-    image: ddo-cloudflare:dev
+    image: mrkhachaturov/ddo-cloudflare:dev
     environment:
       WEBHOOK_LISTEN: ":9090"
       CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
@@ -52,7 +52,7 @@ services:
         condition: on-failure
 
   ddo-mikrotik:
-    image: ddo-mikrotik:dev
+    image: mrkhachaturov/ddo-mikrotik:dev
     environment:
       WEBHOOK_LISTEN: ":9090"
       MIKROTIK_ADDRESS: ${MIKROTIK_ADDRESS:?set MIKROTIK_ADDRESS in .env}
@@ -69,7 +69,7 @@ services:
         condition: on-failure
 
   ddo-rfc2136:
-    image: ddo-rfc2136:dev
+    image: mrkhachaturov/ddo-rfc2136:dev
     environment:
       WEBHOOK_LISTEN: ":9090"
       RFC2136_HOSTS: ${RFC2136_HOSTS:?set RFC2136_HOSTS in .env}

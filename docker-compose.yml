@@ -44,7 +44,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   ddo-cloudflare:
-    image: ddo-cloudflare:dev
+    image: mrkhachaturov/ddo-cloudflare:dev
     build: ./sidecars/ddo-cloudflare
     environment:
       WEBHOOK_LISTEN: ":9090"
@@ -59,7 +59,7 @@ services:
       CLOUDFLARE_PROXIED_DEFAULT: ${CF_PROXIED_DEFAULT:-false}
 
   ddo-mikrotik:
-    image: ddo-mikrotik:dev
+    image: mrkhachaturov/ddo-mikrotik:dev
     build: ./sidecars/ddo-mikrotik
     environment:
       WEBHOOK_LISTEN: ":9090"
@@ -71,7 +71,7 @@ services:
       MIKROTIK_ZONES: ${MIKROTIK_ZONES:-}
 
   ddo-rfc2136:
-    image: ddo-rfc2136:dev
+    image: mrkhachaturov/ddo-rfc2136:dev
     build: ./sidecars/ddo-rfc2136
     environment:
       WEBHOOK_LISTEN: ":9090"

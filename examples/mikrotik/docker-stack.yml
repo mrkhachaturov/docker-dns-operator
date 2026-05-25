@@ -44,7 +44,7 @@ services:
         condition: on-failure
 
   ddo-mikrotik:
-    image: ddo-mikrotik:dev
+    image: mrkhachaturov/ddo-mikrotik:dev
     environment:
       WEBHOOK_LISTEN: ":9090"
       MIKROTIK_ADDRESS: ${MIKROTIK_ADDRESS:?set MIKROTIK_ADDRESS in .env}

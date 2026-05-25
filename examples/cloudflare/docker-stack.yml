@@ -20,6 +20,7 @@ services:
       PROJECT_LABEL: docker-dns-operator
       INSTANCE_ID: cloudflare-swarm-example
       EXECUTION_FREQUENCY_SECONDS: "30"
+      WEBHOOK_TIMEOUT_SECONDS: "60"
       WEBHOOK_CF_URL: http://ddo-cloudflare:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -32,7 +33,7 @@ services:
         condition: on-failure
 
   ddo-cloudflare:
-    image: ddo-cloudflare:dev
+    image: mrkhachaturov/ddo-cloudflare:dev
     environment:
       WEBHOOK_LISTEN: ":9090"
       CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
@@ -40,8 +41,11 @@ services:
       CLOUDFLARE_DEFAULT_TTL: ${CF_DEFAULT_TTL:-1}
       CLOUDFLARE_PROXIED_DEFAULT: ${CF_PROXIED_DEFAULT:-false}
     deploy:
+      placement:
+        constraints:
+          - node.role == manager
       restart_policy:
-        condition: on-failure
+        condition: any
 
   target:
     image: busybox:latest
