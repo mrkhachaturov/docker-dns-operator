@@ -15,7 +15,7 @@
 
 services:
   docker-dns-operator:
-    image: mrkhachaturov/docker-dns-operator:dev
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.0
     build: ../..
     depends_on:
       - ddo-mikrotik
@@ -29,7 +29,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   ddo-mikrotik:
-    image: mrkhachaturov/ddo-mikrotik:dev
+    image: ghcr.io/mrkhachaturov/ddo-mikrotik:0.1.0
     build: ../../sidecars/ddo-mikrotik
     environment:
       WEBHOOK_LISTEN: ":9090"

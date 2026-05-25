@@ -6,17 +6,17 @@
 # Active Directory at once.
 #
 # How to run:
-#   1. cp .env.example .env
-#   2. edit .env and fill in your real values
-#      (.env is gitignored; .env.example documents every variable)
-#   3. docker compose up --build
+#   1. cp .env.example .env  (then edit — .env is gitignored)
+#   2. cp examples/rfc2136/krb5.conf.example examples/rfc2136/krb5.conf
+#      (then edit realm + KDC hosts — krb5.conf is gitignored)
+#   3. docker compose up
 #
 # For provider-specific minimal examples, see examples/cloudflare,
 # examples/mikrotik, and examples/rfc2136.
 
 services:
   docker-dns-operator:
-    image: mrkhachaturov/docker-dns-operator:dev
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.0
     build: .
     depends_on:
       - ddo-cloudflare
@@ -44,7 +44,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   ddo-cloudflare:
-    image: mrkhachaturov/ddo-cloudflare:dev
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.0
     build: ./sidecars/ddo-cloudflare
     environment:
       WEBHOOK_LISTEN: ":9090"
@@ -54,12 +54,11 @@ services:
       CLOUDFLARE_ZONES: ${CF_ZONES:-}
       # Cloudflare convention: 1 = "automatic" TTL.
       CLOUDFLARE_DEFAULT_TTL: ${CF_DEFAULT_TTL:-1}
-      # Default proxy state when an entry does not set
-      # providerOptions.cf.proxy explicitly.
-      CLOUDFLARE_PROXIED_DEFAULT: ${CF_PROXIED_DEFAULT:-false}
+      # Proxied (orange-cloud) state is per-record via the label
+      # providerOptions.cf.proxy. Sidecar default when unset is `false`.
 
   ddo-mikrotik:
-    image: mrkhachaturov/ddo-mikrotik:dev
+    image: ghcr.io/mrkhachaturov/ddo-mikrotik:0.1.0
     build: ./sidecars/ddo-mikrotik
     environment:
       WEBHOOK_LISTEN: ":9090"
@@ -71,7 +70,7 @@ services:
       MIKROTIK_ZONES: ${MIKROTIK_ZONES:-}
 
   ddo-rfc2136:
-    image: mrkhachaturov/ddo-rfc2136:dev
+    image: ghcr.io/mrkhachaturov/ddo-rfc2136:0.1.0
     build: ./sidecars/ddo-rfc2136
     environment:
       WEBHOOK_LISTEN: ":9090"

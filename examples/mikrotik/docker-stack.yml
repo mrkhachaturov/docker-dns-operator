@@ -26,7 +26,7 @@
 
 services:
   docker-dns-operator:
-    image: mrkhachaturov/docker-dns-operator:dev
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.0
     environment:
       LOG_LEVEL: debug
       PROJECT_LABEL: docker-dns-operator
@@ -44,7 +44,7 @@ services:
         condition: on-failure
 
   ddo-mikrotik:
-    image: mrkhachaturov/ddo-mikrotik:dev
+    image: ghcr.io/mrkhachaturov/ddo-mikrotik:0.1.0
     environment:
       WEBHOOK_LISTEN: ":9090"
       MIKROTIK_ADDRESS: ${MIKROTIK_ADDRESS:?set MIKROTIK_ADDRESS in .env}

@@ -14,7 +14,7 @@
 
 services:
   docker-dns-operator:
-    image: mrkhachaturov/docker-dns-operator:dev
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.0
     environment:
       LOG_LEVEL: debug
       PROJECT_LABEL: docker-dns-operator
@@ -31,7 +31,7 @@ services:
         condition: on-failure
 
   ddo-rfc2136:
-    image: mrkhachaturov/ddo-rfc2136:dev
+    image: ghcr.io/mrkhachaturov/ddo-rfc2136:0.1.0
     environment:
       WEBHOOK_LISTEN: ":9090"
       RFC2136_HOSTS: ${RFC2136_HOSTS:?set RFC2136_HOSTS in .env}

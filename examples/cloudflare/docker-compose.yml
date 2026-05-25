@@ -14,16 +14,16 @@
 
 services:
   ddo-cloudflare:
-    image: mrkhachaturov/ddo-cloudflare:dev
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.0
     build: ../../sidecars/ddo-cloudflare
     environment:
       WEBHOOK_LISTEN: ":9090"
       CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
       CLOUDFLARE_ZONES: ${CF_ZONES:-}
-      CLOUDFLARE_PROXIED_DEFAULT: ${CF_PROXIED_DEFAULT:-false}
+      # Proxy state is per-record via providerOptions.cf.proxy label.
 
   docker-dns-operator:
-    image: mrkhachaturov/docker-dns-operator:dev
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.0
     build: ../..
     depends_on:
       - ddo-cloudflare

@@ -5,6 +5,9 @@
 # service-level labels via listServices (auto-detected from `docker info`).
 #
 # Run:
+#   cp .env.example .env  (then edit — .env is gitignored)
+#   cp examples/rfc2136/krb5.conf.example examples/rfc2136/krb5.conf
+#     (then edit realm + KDC hosts — krb5.conf is gitignored)
 #   set -a; source .env; set +a
 #   docker stack deploy -c docker-stack.yml ddo
 #
@@ -21,7 +24,7 @@
 
 services:
   docker-dns-operator:
-    image: mrkhachaturov/docker-dns-operator:dev
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.0
     environment:
       LOG_LEVEL: debug
       PROJECT_LABEL: docker-dns-operator
@@ -40,19 +43,19 @@ services:
         condition: on-failure
 
   ddo-cloudflare:
-    image: mrkhachaturov/ddo-cloudflare:dev
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.0
     environment:
       WEBHOOK_LISTEN: ":9090"
       CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
       CLOUDFLARE_ZONES: ${CF_ZONES:-}
       CLOUDFLARE_DEFAULT_TTL: ${CF_DEFAULT_TTL:-1}
-      CLOUDFLARE_PROXIED_DEFAULT: ${CF_PROXIED_DEFAULT:-false}
+      # Proxy state is per-record via providerOptions.cf.proxy label.
     deploy:
       restart_policy:
         condition: on-failure
 
   ddo-mikrotik:
-    image: mrkhachaturov/ddo-mikrotik:dev
+    image: ghcr.io/mrkhachaturov/ddo-mikrotik:0.1.0
     environment:
       WEBHOOK_LISTEN: ":9090"
       MIKROTIK_ADDRESS: ${MIKROTIK_ADDRESS:?set MIKROTIK_ADDRESS in .env}
@@ -69,7 +72,7 @@ services:
         condition: on-failure
 
   ddo-rfc2136:
-    image: mrkhachaturov/ddo-rfc2136:dev
+    image: ghcr.io/mrkhachaturov/ddo-rfc2136:0.1.0
     environment:
       WEBHOOK_LISTEN: ":9090"
       RFC2136_HOSTS: ${RFC2136_HOSTS:?set RFC2136_HOSTS in .env}
