@@ -10,17 +10,21 @@ Guidance for Claude Code (and other AI assistants) when working in this reposito
 Fork of [timk153/docker-external-dns](https://github.com/timk153/docker-external-dns) that
 adds:
 
-- **Sidecar-based DNS providers** — every backend (Cloudflare, MikroTik, RFC 2136) runs
-  as its own webhook sidecar discovered via `WEBHOOK_<NAME>_URL` env vars
+- **Sidecar-based DNS providers** — every backend (Cloudflare, MikroTik, RFC 2136) is
+  a standalone webhook sidecar discovered via `WEBHOOK_<NAME>_URL` env vars. The
+  operator carries no in-process DNS implementation.
 - **Per-entry provider routing** via a `providers` label
 - **Docker Swarm** discovery (auto-detected at startup via `docker info`)
 
-The service reads DNS labels from Docker containers (or Swarm services), reconciles them
-against the configured providers on a CRON tick, and tags managed records with an
-ownership comment (`${PROJECT_LABEL}:${INSTANCE_ID}`) so it never touches records it
-doesn't own.
+The operator reads DNS labels from Docker containers (or Swarm services), reconciles
+them against the configured sidecars on a CRON tick, and tags managed records with
+`${PROJECT_LABEL}:${INSTANCE_ID}` so it never touches records it doesn't own.
 
-See [README.md](README.md) for the full user-facing guide.
+The wire format between operator and sidecar is the
+[kubernetes-sigs/external-dns webhook provider v1 contract](https://kubernetes-sigs.github.io/external-dns/latest/docs/tutorials/webhook-provider/) —
+the same sidecars work with upstream `external-dns` interchangeably.
+
+See [README.md](README.md) for the user-facing guide.
 
 ## Tech stack
 
@@ -29,7 +33,9 @@ See [README.md](README.md) for the full user-facing guide.
 - **Framework:** NestJS 11 (TypeScript)
 - **Test runner:** Jest (unit + e2e)
 - **Lint/format:** ESLint (airbnb-typescript) + Prettier
-- **Container:** Dockerfile in repo root
+- **Container:** Dockerfile in repo root, published to GHCR
+- **CI/CD:** GitHub Actions (CI, Release, CodeQL, Scorecard) — all action refs
+  SHA-pinned with version comments; Dependabot keeps them current.
 
 ## Repository layout
 
@@ -37,17 +43,24 @@ See [README.md](README.md) for the full user-facing guide.
 src/
 ├── app.module.ts              Composition root
 ├── app.service.ts             Top-level reconciliation orchestrator
-├── app.configuration.ts       Joi-validated env config
+├── app.configuration.ts       Joi-validated env config (source of truth)
 ├── app.functions.ts           Pure helpers (diffing, routing)
 ├── webhook-provider/          Generic external-dns webhook v1 client + registry
 ├── docker/                    Docker / Swarm source — label parsing
-├── providers/                 Provider interface + registry
+├── providers/                 Provider interface + registry (kept thin; no impls)
 ├── ddns/                      DDNS (public IP) service
-├── cron/                      CRON scheduler
+├── cron/                      CRON scheduler (with runJobSafely wrapper)
 ├── dto/, validators/, errors/, @types/
 └── main.ts                    Nest bootstrap
-sidecars/                      Submodules: ddo-cloudflare / ddo-mikrotik / ddo-rfc2136
-test/                          e2e specs (jest-e2e.json)
+sidecars/                      Git submodules (their own repos):
+├── ddo-cloudflare/            Go, distroless, pure
+├── ddo-mikrotik/              Go, distroless, pure
+└── ddo-rfc2136/               Go, alpine + krb5 (CGO required for GSS-TSIG)
+.github/workflows/             ci.yml, release.yml, codeql.yml, scorecard.yml
+examples/                      Provider-specific compose minimal examples
+test/                          e2e specs (jest-e2e.json) — testcontainers
+docker-compose.yml             Full all-providers showcase
+docker-stack.yml               Swarm-mode variant
 ```
 
 Unit specs live next to the code (`*.spec.ts`). E2E specs live under `test/`.
@@ -64,7 +77,7 @@ yarn format                    # prettier --write
 yarn test                      # unit tests
 yarn test:watch
 yarn test:cov                  # with coverage
-yarn test:e2e                  # e2e tests (runInBand)
+yarn test:e2e                  # e2e (testcontainers — Docker required)
 ```
 
 CI variants (`test:ci`, `test:e2e:ci`) tolerate non-zero exits — don't use them locally
@@ -72,49 +85,94 @@ for verification.
 
 ## Architecture notes
 
-- **Provider abstraction** — every provider implements `DnsProvider` in
-  [src/providers/dns-provider.interface.ts](src/providers/dns-provider.interface.ts).
-  Every backend is a webhook sidecar speaking the external-dns webhook v1 contract;
-  adding a new one means publishing a sidecar repo and pointing the operator at it
-  via a `WEBHOOK_<NAME>_URL` env var. Discovery lives in
-  [src/webhook-provider/registry.ts](src/webhook-provider/registry.ts) — no
-  operator-side code changes for new backends.
-- **Per-entry routing** — each discovered DNS entry carries a `providers` field. The
-  reconciler fans out entries to the providers named in that field. Empty/missing means
-  "all enabled providers."
-- **Ownership tagging** — managed records carry `${PROJECT_LABEL}:${INSTANCE_ID}` as a
-  comment. Reconciliation only diffs records matching that tag — unrelated records are
-  never touched.
-- **Swarm mode** — `DockerService.resolveSwarmMode()` calls `docker info` on the first
-  `getSources()` tick and caches the result. Swarm mode is enabled iff
-  `Swarm.LocalNodeState === 'active'` AND `Swarm.ControlAvailable === true` (i.e.
-  the operator landed on a manager). In Swarm mode labels must be set via
-  `deploy.labels`, and `PRESERVE_STOPPED` is irrelevant (services are always listed).
+- **Provider abstraction** — every backend is a webhook sidecar speaking the
+  external-dns webhook v1 contract. Discovery lives in
+  [src/webhook-provider/registry.ts](src/webhook-provider/registry.ts):
+  any env var matching `WEBHOOK_<NAME>_URL` registers a named provider whose key
+  is `<NAME>` lowercased with underscores → hyphens. Adding a new backend is
+  zero operator-side code: publish a sidecar repo + add one env var.
+- **Per-entry routing** — each discovered DNS entry carries a `providers` field.
+  The reconciler fans out entries strictly: a typo in `providers: [...]` fails
+  that entry loudly. Empty/missing means "all enabled providers."
+- **Ownership tagging** — the operator stamps every Endpoint with
+  `labels.owner = ${PROJECT_LABEL}:${INSTANCE_ID}`. Sidecars round-trip that
+  value verbatim through their backend's native facility:
+  - Cloudflare / MikroTik — record `comment` field
+  - RFC 2136 — paired TXT marker `ddo-<type>.<name>` with value `owned-by=<owner>`
+  No sidecar derives ownership from its own env — two operators with different
+  `INSTANCE_ID`s coexist safely in the same zone.
+- **Swarm mode** — `DockerService.resolveSwarmMode()` calls `docker info` on the
+  first `getSources()` tick. Enabled iff `Swarm.LocalNodeState === 'active'`
+  AND `Swarm.ControlAvailable === true` (manager). In Swarm mode labels must
+  live under `deploy.labels`, and `PRESERVE_STOPPED` is irrelevant.
+
+## Release process
+
+Tag-driven, fully automated per repo (operator + 3 sidecars):
+
+1. Update `CHANGELOG.md` with a `## [X.Y.Z] — YYYY-MM-DD` section (Keep-a-Changelog).
+2. `git tag vX.Y.Z && git push origin vX.Y.Z`.
+3. GitHub Actions `release.yml` triggers:
+   - Extracts the matching CHANGELOG section via `awk` → release notes
+   - Builds linux/amd64 (native) + linux/arm64 (`ubuntu-24.04-arm` native) per matrix
+   - Push-by-digest to GHCR, then `buildx imagetools create` merges to manifest list
+   - Tags: `:X.Y.Z`, `:X.Y`, `:X`, `:latest` (when not prerelease)
+   - SBOM (SPDX) via `anchore/sbom-action`, provenance attestation via OIDC,
+     Trivy SARIF → Security tab, GitHub Release with notes + SBOM
+4. Sidecars first, operator last — so the operator's `:latest` references
+   sidecars that already exist.
+
+Tag protection rulesets block deletion/update of `v*` tags. Branch protection
+on `main` blocks force-push, requires linear history + resolved conversations.
 
 ## Conventions
 
-- **Tests are mandatory** for new behaviour — TDD-style. Unit spec next to the file;
-  e2e spec under `test/` if it crosses module boundaries.
-- **Don't mock what you can fake.** Provider integration code prefers real interfaces
-  with deterministic fakes over jest.mock spaghetti.
+- **Tests are mandatory** for new behaviour — TDD-style. Unit spec next to the
+  file; e2e under `test/` when crossing module boundaries.
+- **Don't mock what you can fake.** Provider integration code prefers real
+  interfaces with deterministic fakes over `jest.mock` spaghetti.
 - **No comments explaining WHAT.** Only WHY, and only when the WHY isn't obvious.
-- **Joi schemas are the source of truth** for env config — update them when adding
+- **Joi schemas are the source of truth** for env config —
+  [src/app.configuration.ts](src/app.configuration.ts). Update them when adding
   variables, and update the README table.
-- **Don't introduce new top-level deps** without a clear need; this is a small,
-  focused service.
+- **Don't introduce new top-level deps** without a clear need; small, focused service.
+- **Don't fork the wire contract.** The operator-to-sidecar protocol IS
+  external-dns webhook provider v1. Read
+  [.upstream/external-dns](https://github.com/kubernetes-sigs/external-dns) before
+  inventing a shape.
+
+## Public-repo hygiene
+
+This is a public OSS repo. NEVER commit:
+
+- Real AD/Kerberos realm names (use `AD.EXAMPLE.ORG` / `CORP.EXAMPLE.COM`).
+- Real DC FQDNs (use `dc01.ad.example.org`).
+- Real router IPs / hostnames / credentials.
+- Real Cloudflare zone names. Use `example.com` / `example.org` / `example.net`
+  (RFC 2606) or RFC 5737 (`192.0.2.x` / `198.51.100.x` / `203.0.113.x`) for IPs.
+
+The `examples/rfc2136/krb5.conf` file is **gitignored**; only
+`examples/rfc2136/krb5.conf.example` (with placeholder realm) is committed.
+Same pattern for `.env` vs `.env.example`.
+
+If you're unsure whether something is real or example, ask before committing.
 
 ## When making changes
 
 1. Read the relevant module's existing spec file first — it documents the contract.
 2. Add/extend the spec before changing implementation.
 3. Run `yarn lint && yarn test` before declaring done. Run `yarn test:e2e` if your
-   change touches reconciliation, Docker source, or provider wiring.
-4. Update [README.md](README.md) if you changed env vars, labels, or user-visible
-   behaviour.
+   change touches reconciliation, Docker source, or webhook wiring.
+4. Update [README.md](README.md) and `.env.example` if env vars / labels /
+   user-visible behaviour changed.
+5. If a sidecar contract changes, update the sidecar repo too (it's a submodule —
+   commit there first, then bump the operator's pointer).
 
 ## Out of scope for this repo
 
 - Kubernetes integration (use upstream
-  [external-dns](https://github.com/kubernetes-sigs/external-dns))
-- Non-Docker sources
-- IPv6 DDNS (only IPv4 is supported today)
+  [external-dns](https://github.com/kubernetes-sigs/external-dns) — same wire
+  contract, so any sidecar works there too).
+- Non-Docker sources.
+- IPv6 DDNS (only IPv4 is supported for the `"DDNS"` literal; AAAA records
+  themselves are supported via rfc2136).
