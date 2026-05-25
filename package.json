@@ -1,14 +1,41 @@
 {
   "name": "docker-dns-operator",
-  "version": "0.1.0",
-  "description": "",
-  "author": "",
+  "version": "0.1.2",
+  "description": "Declarative DNS for Docker & Swarm — the Docker analog of kubernetes-sigs/external-dns. Label your containers; the operator reconciles A/AAAA/CNAME/MX/NS via external-dns webhook v1 sidecars (Cloudflare, MikroTik RouterOS, RFC 2136/GSS-TSIG, or your own). Per-entry routing, multi-instance ownership tagging.",
+  "author": "Ruben Khachaturov <mr.kha4a2rov@protonmail.com>",
+  "license": "MIT",
   "private": true,
+  "homepage": "https://github.com/mrkhachaturov/docker-dns-operator#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mrkhachaturov/docker-dns-operator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mrkhachaturov/docker-dns-operator/issues"
+  },
+  "keywords": [
+    "active-directory",
+    "cloudflare",
+    "ddns",
+    "ddo",
+    "dns",
+    "docker",
+    "docker-swarm",
+    "external-dns",
+    "gss-tsig",
+    "kerberos",
+    "mikrotik",
+    "nestjs",
+    "rfc2136",
+    "routeros",
+    "sidecar",
+    "typescript",
+    "webhook"
+  ],
   "engines": {
     "node": ">=22.11.0",
     "yarn": ">=1.22.19 < 1.23.0"
   },
-  "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
