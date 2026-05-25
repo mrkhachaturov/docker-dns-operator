@@ -11,7 +11,7 @@
 | 🏷️ | Source of truth | Container labels, or Swarm `deploy.labels` |
 | 🔄 | Reconciler | Reads labels every `EXECUTION_FREQUENCY_SECONDS`, diffs, applies |
 | 🌐 | Providers | Cloudflare, MikroTik RouterOS, RFC 2136 / Active Directory |
-| 🛡️ | Ownership | TXT marker `ddo-<type>.<name>`. Pre-existing records are never touched |
+| 🛡️ | Ownership | Per-sidecar marker carrying `${PROJECT_LABEL}:${INSTANCE_ID}`. Pre-existing records are never touched |
 | 🧩 | Records | A, AAAA (RFC 2136 only), CNAME, MX, NS |
 
 > [!TIP]
@@ -70,9 +70,12 @@ Each tick the reconciler:
 Standalone Docker vs Swarm mode is **auto-detected at startup** via `docker info`. On a Swarm manager the operator switches to `listServices` and reads labels from `deploy.labels`. On a worker or non-swarm host it falls back to local containers. To manage labels across the whole cluster from a single operator instance, run it on a manager node.
 
 > [!IMPORTANT]
-> Every managed record carries a sibling TXT record at `ddo-<type>.<name>` whose value is `owned-by=${PROJECT_LABEL}:${INSTANCE_ID}`. The reconciler refuses to modify any record without that marker.
+> Every managed record is stamped with the operator's identity `${PROJECT_LABEL}:${INSTANCE_ID}` so the reconciler only ever touches its own records. The mechanism differs per sidecar to match the backend's native facilities:
 >
-> For an A record at `app.example.com` you'll see a paired `TXT ddo-a.app.example.com "owned-by=docker-dns-operator:1"` in the zone.
+> - **Cloudflare** and **MikroTik** — written into the record's `comment` field.
+> - **RFC 2136 / AD** — paired TXT record at `ddo-<type>.<name>` with value `owned-by=${PROJECT_LABEL}:${INSTANCE_ID}` (the external-dns convention for raw DNS).
+>
+> In all three cases the operator sees only rows carrying its own marker; everything else stays untouched. Two instances with different `INSTANCE_ID`s coexist safely in the same zone.
 
 ---
 
@@ -116,7 +119,7 @@ For MikroTik or Active Directory, see [Providers](#-providers).
 
 ## 🌐 Providers
 
-The operator ships three providers today, all implementing the same `DnsProvider` interface. New ones plug in via one file — see [Development](#-development). Providers that need a protocol layer outside Node (Kerberos, signed updates, exotic transports) run as a **webhook sidecar** in their own container, addressed via `<PROVIDER>_WEBHOOK_URL` and shipped from a separate repo attached under [sidecars/](sidecars/) as a git submodule.
+Every backend is a webhook sidecar speaking the [external-dns webhook provider v1](https://kubernetes-sigs.github.io/external-dns/latest/docs/tutorials/webhook-provider/) contract. The operator itself has no in-process DNS implementation — it discovers any number of named sidecars from `WEBHOOK_<NAME>_URL` env vars and routes records to them by name. Three reference sidecars live under [sidecars/](sidecars/) as git submodules; adding a new backend means publishing a sidecar repo and pointing the operator at it via one more env var (no operator code changes).
 
 ### ☁️ Cloudflare (via webhook sidecar)
 
@@ -136,7 +139,7 @@ The sidecar lives in its own repo at [mrkhachaturov/ddo-mikrotik](https://github
 
 ### 🏢 RFC 2136 / Active Directory (via webhook sidecar)
 
-Enabled when the required operator-side `RFC2136_*` variables are set and the [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) webhook sidecar is reachable at `RFC2136_WEBHOOK_URL`. Uses the same RFC 2136 provider model as [external-dns](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/rfc2136.md), with GSS-TSIG for Active Directory.
+Enabled when `WEBHOOK_RFC2136_URL` is set on the operator and the [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) webhook sidecar is reachable at that URL. Uses the same RFC 2136 provider model as [external-dns](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/rfc2136.md), with GSS-TSIG for Active Directory. All RFC 2136 configuration (DC hosts, zones, Kerberos realm/principal, keytab, TTLs, AXFR toggle, dry-run) lives on the sidecar — see its [README](https://github.com/mrkhachaturov/ddo-rfc2136#configuration) for the full env list.
 
 Supports A, AAAA, CNAME, MX, NS.
 
@@ -156,12 +159,12 @@ graph LR
     style HC fill:#10b981,color:#fff,stroke:#10b981
 ```
 
-The Kerberos/TSIG protocol layer runs in a separate Go webhook sidecar that lives in its own repo at [mrkhachaturov/ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) and is attached here as a git submodule under [sidecars/ddo-rfc2136/](sidecars/ddo-rfc2136/). The sidecar runs `kinit -kt` against a keytab on startup, refreshes the TGT every `RFC2136_KINIT_REFRESH_INTERVAL`, signs UPDATE and AXFR with GSS-TSIG, and exposes `/healthz` (HTTP 503 with `{"kerberos":"expired"}` on refresh failure).
+The Kerberos/TSIG protocol layer runs in a separate Go webhook sidecar that lives in its own repo at [mrkhachaturov/ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) and is attached here as a git submodule under [sidecars/ddo-rfc2136/](sidecars/ddo-rfc2136/). The sidecar acquires Kerberos credentials on startup (either `kinit -kt` against a keytab or password mode), refreshes the TGT in the background, signs UPDATE and AXFR with GSS-TSIG, and exposes `/healthz`.
 
-The operator implements failover across multiple DCs (`RFC2136_HOSTS`) with a per-DC circuit breaker, per-zone DC pinning, and an AXFR-disabled mode (`RFC2136_AXFR_ENABLED=false`) for environments where zone transfers are denied.
+The **sidecar** implements failover across multiple DCs (`RFC2136_HOSTS` env on the sidecar) with a per-DC circuit breaker, per-zone DC pinning, and an AXFR-disabled mode for environments where zone transfers are denied — see the sidecar README for the full list. Ownership is round-tripped through the standard external-dns paired TXT marker (`ddo-<type>.<name>`), surfaced verbatim on `GET /records` and respected on `POST /records`.
 
 > [!CAUTION]
-> `RFC2136_HOSTS` must contain real DNS hostnames of your DCs. IPs and bare hostnames are rejected at startup. AD's Kerberos service principal is bound to the host you contact; an IP or short name produces `KDC_ERR_S_PRINCIPAL_UNKNOWN` or `KDC_ERR_WRONG_REALM` on every cycle.
+> `RFC2136_HOSTS` (on the sidecar) must contain real DNS hostnames of your DCs. IPs and bare hostnames are rejected at startup. AD's Kerberos service principal is bound to the host you contact; an IP or short name produces `KDC_ERR_S_PRINCIPAL_UNKNOWN` or `KDC_ERR_WRONG_REALM` on every cycle.
 
 See [docs/rfc2136-integration-runbook.md](docs/rfc2136-integration-runbook.md) for keytab generation, AD permission setup, and the full deployment walkthrough.
 
@@ -245,31 +248,17 @@ The operator's only MikroTik-related variable is the URL of the sidecar. All Rou
 </details>
 
 <details>
-<summary><strong>🏢 RFC 2136 — operator-side env (all-or-nothing)</strong></summary>
+<summary><strong>🏢 RFC 2136 — operator-side env</strong></summary>
 
-All variables below must be set, or the rfc2136 provider is not registered. Entries routed to `rfc2136` then fail reconciliation with an error.
+The operator's only RFC 2136-related variable is the URL of the sidecar. All RFC 2136 configuration (DC hosts, zones, Kerberos realm/principal, keytab, TTLs, AXFR toggle, dry-run, circuit-breaker thresholds, domain filter) lives on the [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) sidecar's environment — see its [README](https://github.com/mrkhachaturov/ddo-rfc2136#configuration) for the full list.
 
 | Variable | Default | Description |
 |---|---|---|
-| `RFC2136_WEBHOOK_URL` |  | URL of the `ddo-rfc2136` webhook sidecar, e.g. `http://ddo-rfc2136:9090`. Probed at `<URL>/healthz` on startup. |
-| `RFC2136_AUTH_MODE` |  | Only `gss-tsig` is supported. |
-| `RFC2136_HOSTS` |  | Comma-separated FQDNs of AD DCs in failover order. IPs and short names are rejected. |
-| `RFC2136_PORT` | `53` | UDP/TCP port for DNS UPDATE. |
-| `RFC2136_ZONES` |  | Comma-separated zones this provider manages. |
-| `RFC2136_KERBEROS_REALM` |  | Kerberos realm, uppercase (`CORP.EXAMPLE.COM`). Validated at startup against `RFC2136_KERBEROS_PRINCIPAL`. |
-| `RFC2136_KERBEROS_PRINCIPAL` |  | Service principal (`svc-dns@CORP.EXAMPLE.COM`). Realm portion must match `RFC2136_KERBEROS_REALM`. |
-| `RFC2136_DEFAULT_TTL` | `3600` | TTL when none is supplied per entry. |
-| `RFC2136_MIN_TTL` | `60` | Minimum TTL floor. Values below are clamped up. |
-| `RFC2136_AXFR_TIMEOUT_SECONDS` | `30` | AXFR request timeout. |
-| `RFC2136_UPDATE_TIMEOUT_SECONDS` | `15` | DNS UPDATE request timeout. |
-| `RFC2136_CIRCUIT_BREAKER_THRESHOLD` | `3` | Consecutive failures before failing over to the next DC. |
-| `RFC2136_DRY_RUN` | `false` | If `true`, log intended changes but do not apply. |
-| `RFC2136_AXFR_ENABLED` | `true` | If `false`, skip AXFR (use when AD blocks zone transfers). Reduces drift detection; writes rely on UPDATE prerequisites. |
-| `RFC2136_DOMAIN_FILTER` |  | Comma-separated name suffixes. Restricts which entries are managed without narrowing `RFC2136_ZONES`. |
+| `WEBHOOK_RFC2136_URL` |  | URL of the `ddo-rfc2136` webhook sidecar, e.g. `http://ddo-rfc2136:9090`. Probed at `<URL>/healthz` on startup. |
 
 </details>
 
-**Sidecar env (set on the `ddo-rfc2136` container):** documented in the [sidecar repo README](https://github.com/mrkhachaturov/ddo-rfc2136#required-env-vars). Each webhook sidecar owns its own configuration docs, matching the [external-dns webhook-provider model](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/webhook-provider.md). `RFC2136_KERBEROS_REALM` and `RFC2136_KERBEROS_PRINCIPAL` are duplicated on both containers — the operator validates them at startup so misconfiguration fails fast; the sidecar uses them at runtime. The operator never reads the keytab and never obtains Kerberos tickets; it only validates that its routing config matches the sidecar identity.
+**Sidecar env (set on the `ddo-rfc2136` container):** documented in the [sidecar repo README](https://github.com/mrkhachaturov/ddo-rfc2136#configuration). Each webhook sidecar owns its own configuration docs, matching the [external-dns webhook-provider model](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/webhook-provider.md). The operator never reads the keytab and never obtains Kerberos tickets — that all happens inside the sidecar.
 
 ### 🏷️ Label schema
 
@@ -489,28 +478,30 @@ services:
 <details>
 <summary>🏢 <strong>Active Directory (RFC 2136)</strong></summary>
 
+The operator carries only the sidecar URL. All RFC 2136 configuration (DC hosts, zones, Kerberos realm/principal, keytab) lives on the sidecar:
+
 ```yaml
 services:
   dns-operator:
     image: mrkhachaturov/docker-dns-operator:latest
     environment:
-      RFC2136_WEBHOOK_URL: "http://ddo-rfc2136:9090"
-      RFC2136_AUTH_MODE: "gss-tsig"
-      RFC2136_HOSTS: "dc01.corp.example.com,dc02.corp.example.com"
-      RFC2136_ZONES: "corp.example.com"
-      RFC2136_KERBEROS_REALM: "CORP.EXAMPLE.COM"
-      RFC2136_KERBEROS_PRINCIPAL: "svc-dns@CORP.EXAMPLE.COM"
+      WEBHOOK_RFC2136_URL: "http://ddo-rfc2136:9090"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   ddo-rfc2136:
     image: mrkhachaturov/ddo-rfc2136:latest
     environment:
+      RFC2136_HOSTS: "dc01.corp.example.com,dc02.corp.example.com"
+      RFC2136_ZONES: "corp.example.com"
       RFC2136_KERBEROS_REALM: "CORP.EXAMPLE.COM"
       RFC2136_KERBEROS_PRINCIPAL: "svc-dns@CORP.EXAMPLE.COM"
-      RFC2136_KEYTAB_FILE: "/run/secrets/rfc2136_keytab"
+      # Pick exactly one auth mode:
+      RFC2136_AD_PASSWORD_FILE: "/run/secrets/rfc2136_password"
+      # or:
+      # RFC2136_KEYTAB_FILE: "/run/secrets/rfc2136_keytab"
     secrets:
-      - rfc2136_keytab
+      - rfc2136_password
 
   app:
     image: nginx
@@ -521,8 +512,8 @@ services:
            "providerOptions": { "rfc2136": { "ttl": 600 } } }]
 
 secrets:
-  rfc2136_keytab:
-    file: ./rfc2136.keytab
+  rfc2136_password:
+    file: ./rfc2136_password.txt
 ```
 
 See [docs/rfc2136-integration-runbook.md](docs/rfc2136-integration-runbook.md) for the full setup.
