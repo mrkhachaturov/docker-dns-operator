@@ -158,11 +158,3 @@ Same for `.env` vs `.env.example`.
 5. If a sidecar contract changes, update the sidecar repo too (it's a submodule —
    commit there first, then bump the operator's pointer).
 
-## Out of scope for this repo
-
-- Kubernetes integration (use upstream
-  [external-dns](https://github.com/kubernetes-sigs/external-dns) — same wire
-  contract, so any sidecar works there too).
-- Non-Docker sources.
-- IPv6 DDNS (only IPv4 is supported for the `"DDNS"` literal; AAAA records
-  themselves are supported via rfc2136).
