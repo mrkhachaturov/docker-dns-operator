@@ -17,22 +17,25 @@ function makeProvider(key: string, configured: boolean): IDnsProvider {
 
 describe('ProviderRegistry', () => {
   let logger: DeepMocked<ConsoleLoggerService>;
-  let cfProvider: IDnsProvider;
-  let mikrotikProvider: IDnsProvider;
+  let configuredProvider: IDnsProvider;
+  let unconfiguredProvider: IDnsProvider;
   let sut: ProviderRegistry;
 
   beforeEach(() => {
     logger = createMock<ConsoleLoggerService>();
-    cfProvider = makeProvider('cf', true);
-    mikrotikProvider = makeProvider('mikrotik', false);
-    sut = new ProviderRegistry([cfProvider, mikrotikProvider], logger);
+    configuredProvider = makeProvider('cf', true);
+    unconfiguredProvider = makeProvider('mikrotik', false);
+    sut = new ProviderRegistry(
+      [configuredProvider, unconfiguredProvider],
+      logger,
+    );
   });
 
   describe('initialize', () => {
     it('registers configured providers and initializes them', () => {
       sut.initialize();
-      expect(cfProvider.initialize).toHaveBeenCalledTimes(1);
-      expect(mikrotikProvider.initialize).not.toHaveBeenCalled();
+      expect(configuredProvider.initialize).toHaveBeenCalledTimes(1);
+      expect(unconfiguredProvider.initialize).not.toHaveBeenCalled();
     });
 
     it('throws when no providers are configured', () => {
@@ -51,41 +54,6 @@ describe('ProviderRegistry', () => {
       sut.initialize();
       expect(sut.getAll()).toHaveLength(1);
       expect(sut.getAll()[0].providerKey).toBe('cf');
-    });
-  });
-
-  describe('resolve', () => {
-    beforeEach(() => sut.initialize());
-
-    it('resolves a known configured provider', () => {
-      expect(sut.resolve(['cf'])).toHaveLength(1);
-    });
-
-    it('returns empty and warns for unknown provider', () => {
-      const result = sut.resolve(['unknown']);
-      expect(result).toHaveLength(0);
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining("unknown or unconfigured provider 'unknown'"),
-      );
-    });
-
-    it('returns empty and warns for unconfigured provider', () => {
-      const result = sut.resolve(['mikrotik']);
-      expect(result).toHaveLength(0);
-      expect(logger.warn).toHaveBeenCalled();
-    });
-
-    it('resolves "all" to all registered providers', () => {
-      expect(sut.resolve(['all'])).toHaveLength(1);
-    });
-
-    it('resolves multiple keys', () => {
-      const bothConfigured = new ProviderRegistry(
-        [makeProvider('cf', true), makeProvider('mikrotik', true)],
-        logger,
-      );
-      bothConfigured.initialize();
-      expect(bothConfigured.resolve(['cf', 'mikrotik'])).toHaveLength(2);
     });
   });
 });

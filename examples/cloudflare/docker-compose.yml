@@ -1,4 +1,4 @@
-# Example: Cloudflare-only DNS sync.
+# Example: Cloudflare-only DNS sync via the ddo-cloudflare sidecar.
 #
 # How to run:
 #   1. cp .env.example .env
@@ -13,15 +13,26 @@
 # records in the zone are never touched.
 
 services:
+  ddo-cloudflare:
+    image: mrkhachaturov/ddo-cloudflare:dev
+    build: ../../sidecars/ddo-cloudflare
+    environment:
+      WEBHOOK_LISTEN: ":9090"
+      CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+      CLOUDFLARE_ZONES: ${CF_ZONES:-}
+      CLOUDFLARE_PROXIED_DEFAULT: ${CF_PROXIED_DEFAULT:-false}
+
   docker-dns-operator:
     image: mrkhachaturov/docker-dns-operator:dev
     build: ../..
+    depends_on:
+      - ddo-cloudflare
     environment:
       LOG_LEVEL: debug
       PROJECT_LABEL: docker-dns-operator
       INSTANCE_ID: cloudflare-example
       EXECUTION_FREQUENCY_SECONDS: 30
-      API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+      WEBHOOK_CF_URL: http://ddo-cloudflare:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 

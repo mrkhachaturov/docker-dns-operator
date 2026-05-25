@@ -9,7 +9,7 @@ import { IDnsProvider } from './providers/dns-provider.interface';
 import { DNSTypes } from './dto/dnsbase-entry';
 import { DnsaEntry } from './dto/dnsa-entry';
 import { validDnsAEntry } from './dto/dnsa-entry.spec';
-import { CloudflareProviderRecord } from './cloud-flare/cloudflare-provider-record';
+import { IProviderRecord } from './providers/provider-record.interface';
 
 function makeMockProvider(key: string): DeepMocked<IDnsProvider> {
   return {
@@ -24,18 +24,15 @@ function makeMockProvider(key: string): DeepMocked<IDnsProvider> {
   } as unknown as DeepMocked<IDnsProvider>;
 }
 
-function makeProviderRecord(
-  name: string,
-  type = DNSTypes.A,
-): CloudflareProviderRecord {
-  const r = new CloudflareProviderRecord();
-  r.id = `${name}-id`;
-  r.name = name;
-  r.type = type;
-  r.zoneId = 'zone-1';
-  r.address = '1.2.3.4';
-  r.proxy = false;
-  return r;
+function makeProviderRecord(name: string, type = DNSTypes.A): IProviderRecord {
+  return {
+    id: `${name}-id`,
+    name,
+    type,
+    Key: `${type}:${name}`,
+    providerContext: {},
+    hasSameValue: jest.fn().mockReturnValue(true),
+  };
 }
 
 describe('AppService', () => {
@@ -61,7 +58,6 @@ describe('AppService', () => {
 
     mockCfProvider = makeMockProvider('cf');
     mockProviderRegistry.getAll.mockReturnValue([mockCfProvider]);
-    mockProviderRegistry.resolve.mockReturnValue([mockCfProvider]);
     mockDdnsService.isDdnsRequired.mockReturnValue(false);
   });
 
@@ -208,6 +204,71 @@ describe('AppService', () => {
         new Error('provider error'),
       );
       await expect(sut.job()).rejects.toThrow('provider error');
+    });
+
+    describe('strict provider-name routing', () => {
+      it('logs an error per entry referencing an unknown provider, then skips it', async () => {
+        const good = validDnsAEntry(DnsaEntry, { name: 'good.example.com' });
+        good.providers = ['cf'];
+        const typo = validDnsAEntry(DnsaEntry, { name: 'typo.example.com' });
+        typo.providers = ['mikrotic-home'];
+        mockDockerService.extractDNSEntries.mockReturnValue([good, typo]);
+        const loggerMock = sut['loggerService'];
+
+        await sut.job();
+
+        // typo entry never reached the provider
+        expect(mockCfProvider.createEntry).toHaveBeenCalledWith(good);
+        expect(mockCfProvider.createEntry).not.toHaveBeenCalledWith(typo);
+
+        // and the operator screamed about it
+        expect(loggerMock.error).toHaveBeenCalledWith(
+          expect.stringContaining('mikrotic-home'),
+        );
+        expect(loggerMock.error).toHaveBeenCalledWith(
+          expect.stringContaining('typo.example.com'),
+        );
+      });
+
+      it('lists the configured providers in the error so the user can fix it', async () => {
+        const typo = validDnsAEntry(DnsaEntry, { name: 'x.example.com' });
+        typo.providers = ['mikrotic-home'];
+        mockDockerService.extractDNSEntries.mockReturnValue([typo]);
+        const loggerMock = sut['loggerService'];
+
+        await sut.job();
+
+        expect(loggerMock.error).toHaveBeenCalledWith(
+          expect.stringMatching(/configured providers:\s*\[cf\]/),
+        );
+      });
+
+      it('rejects the whole entry if ANY name in providers is unknown — partial validity is not enough', async () => {
+        const partial = validDnsAEntry(DnsaEntry, {
+          name: 'half.example.com',
+        });
+        partial.providers = ['cf', 'mikrotic-home']; // cf valid, second a typo
+        mockDockerService.extractDNSEntries.mockReturnValue([partial]);
+
+        await sut.job();
+
+        expect(mockCfProvider.createEntry).not.toHaveBeenCalled();
+      });
+
+      it('still allows the "all" token alongside concrete names', async () => {
+        const all = validDnsAEntry(DnsaEntry, { name: 'all.example.com' });
+        all.providers = ['all'];
+        const targeted = validDnsAEntry(DnsaEntry, {
+          name: 'targeted.example.com',
+        });
+        targeted.providers = ['cf'];
+        mockDockerService.extractDNSEntries.mockReturnValue([all, targeted]);
+
+        await sut.job();
+
+        expect(mockCfProvider.createEntry).toHaveBeenCalledWith(all);
+        expect(mockCfProvider.createEntry).toHaveBeenCalledWith(targeted);
+      });
     });
   });
 });

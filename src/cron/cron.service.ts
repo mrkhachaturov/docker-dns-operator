@@ -72,7 +72,7 @@ export abstract class CronService implements OnModuleDestroy {
     } catch (err) {
       this.loggerService.error(
         `CronService (${this.ServiceName}): job threw, continuing — will retry on next tick`,
-        err instanceof Error ? err.stack ?? err.message : String(err),
+        err instanceof Error ? (err.stack ?? err.message) : String(err),
       );
     }
   }

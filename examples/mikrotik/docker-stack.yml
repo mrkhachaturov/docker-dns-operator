@@ -32,15 +32,29 @@ services:
       PROJECT_LABEL: docker-dns-operator
       INSTANCE_ID: mikrotik-swarm-example
       EXECUTION_FREQUENCY_SECONDS: "30"
-      MIKROTIK_BASEURL: ${MIKROTIK_BASEURL:?set MIKROTIK_BASEURL in .env}
-      MIKROTIK_USERNAME: ${MIKROTIK_USERNAME:?set MIKROTIK_USERNAME in .env}
-      MIKROTIK_PASSWORD: ${MIKROTIK_PASSWORD:?set MIKROTIK_PASSWORD in .env}
-      MIKROTIK_SKIP_TLS_VERIFY: ${MIKROTIK_SKIP_TLS_VERIFY:-true}
+      WEBHOOK_MIKROTIK_URL: http://ddo-mikrotik:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     deploy:
       placement:
         # Swarm-mode requires manager access — operator must run on a manager.
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  ddo-mikrotik:
+    image: mrkhachaturov/ddo-mikrotik:dev
+    environment:
+      WEBHOOK_LISTEN: ":9090"
+      MIKROTIK_ADDRESS: ${MIKROTIK_ADDRESS:?set MIKROTIK_ADDRESS in .env}
+      MIKROTIK_USERNAME: ${MIKROTIK_USERNAME:?set MIKROTIK_USERNAME in .env}
+      MIKROTIK_PASSWORD: ${MIKROTIK_PASSWORD:?set MIKROTIK_PASSWORD in .env}
+      MIKROTIK_USE_TLS: ${MIKROTIK_USE_TLS:-false}
+      MIKROTIK_SKIP_TLS_VERIFY: ${MIKROTIK_SKIP_TLS_VERIFY:-false}
+      MIKROTIK_ZONES: ${MIKROTIK_ZONES:-}
+    deploy:
+      placement:
         constraints:
           - node.role == manager
       restart_policy:

@@ -1,8 +1,9 @@
 # Full example — one container, one label, three providers.
 #
-# This is the comprehensive showcase: the operator + the RFC2136 sidecar +
-# a busybox "target" container that carries a single label routing two
-# records (A + MX) to Cloudflare, MikroTik, and Active Directory at once.
+# This is the comprehensive showcase: the operator + two webhook sidecars
+# (ddo-cloudflare, ddo-rfc2136) + a busybox "target" container that carries a
+# single label routing two records (A + MX) to Cloudflare, MikroTik, and
+# Active Directory at once.
 #
 # How to run:
 #   1. cp .env.example .env
@@ -18,44 +19,70 @@ services:
     image: mrkhachaturov/docker-dns-operator:dev
     build: .
     depends_on:
+      - ddo-cloudflare
       - ddo-rfc2136
+      - ddo-mikrotik
     environment:
       LOG_LEVEL: debug
       PROJECT_LABEL: docker-dns-operator
       INSTANCE_ID: full-example
       EXECUTION_FREQUENCY_SECONDS: 30
 
-      # --- Cloudflare ---------------------------------------------------------
-      # Either API_TOKEN (env) or API_TOKEN_FILE (Docker secret). Prefer _FILE.
-      API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+      # --- Cloudflare (via ddo-cloudflare sidecar) ---------------------------
+      WEBHOOK_CF_URL: http://ddo-cloudflare:9090
 
-      # --- MikroTik RouterOS --------------------------------------------------
-      MIKROTIK_BASEURL: ${MIKROTIK_BASEURL:?set MIKROTIK_BASEURL in .env}
-      MIKROTIK_USERNAME: ${MIKROTIK_USERNAME:?set MIKROTIK_USERNAME in .env}
-      MIKROTIK_PASSWORD: ${MIKROTIK_PASSWORD:?set MIKROTIK_PASSWORD in .env}
-      MIKROTIK_SKIP_TLS_VERIFY: ${MIKROTIK_SKIP_TLS_VERIFY:-true}
+      # --- MikroTik RouterOS (talks to ddo-mikrotik sidecar) ------------------
+      # The operator side now needs only the webhook URL; the RouterOS API
+      # endpoint, credentials, and zone list live on the ddo-mikrotik service.
+      WEBHOOK_MIKROTIK_URL: http://ddo-mikrotik:9090
 
       # --- RFC2136 / Active Directory (talks to ddo-rfc2136 sidecar) ----------
-      RFC2136_WEBHOOK_URL: http://ddo-rfc2136:9090
-      RFC2136_AUTH_MODE: gss-tsig
-      RFC2136_HOSTS: ${RFC2136_HOSTS:?set RFC2136_HOSTS in .env}
-      RFC2136_ZONES: ${RFC2136_ZONES:?set RFC2136_ZONES in .env}
-      RFC2136_KERBEROS_REALM: ${RFC2136_KERBEROS_REALM:?set RFC2136_KERBEROS_REALM in .env}
-      RFC2136_KERBEROS_PRINCIPAL: ${RFC2136_KERBEROS_PRINCIPAL:?set RFC2136_KERBEROS_PRINCIPAL in .env}
+      # The operator side now needs only the webhook URL; all rfc2136-specific
+      # config (hosts, zones, realm, keytab) lives on the ddo-rfc2136 service.
+      WEBHOOK_RFC2136_URL: http://ddo-rfc2136:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
+  ddo-cloudflare:
+    image: mrkhachaturov/ddo-cloudflare:dev
+    build: ./sidecars/ddo-cloudflare
+    environment:
+      WEBHOOK_LISTEN: ":9090"
+      CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+      # Optional: comma-separated zone allow-list (empty = every zone the
+      # token can see).
+      CLOUDFLARE_ZONES: ${CF_ZONES:-}
+      # Cloudflare convention: 1 = "automatic" TTL.
+      CLOUDFLARE_DEFAULT_TTL: ${CF_DEFAULT_TTL:-1}
+      # Default proxy state when an entry does not set
+      # providerOptions.cf.proxy explicitly.
+      CLOUDFLARE_PROXIED_DEFAULT: ${CF_PROXIED_DEFAULT:-false}
+
+  ddo-mikrotik:
+    image: mrkhachaturov/ddo-mikrotik:dev
+    build: ./sidecars/ddo-mikrotik
+    environment:
+      WEBHOOK_LISTEN: ":9090"
+      MIKROTIK_ADDRESS: ${MIKROTIK_ADDRESS:?set MIKROTIK_ADDRESS in .env}
+      MIKROTIK_USERNAME: ${MIKROTIK_USERNAME:?set MIKROTIK_USERNAME in .env}
+      MIKROTIK_PASSWORD: ${MIKROTIK_PASSWORD:?set MIKROTIK_PASSWORD in .env}
+      MIKROTIK_USE_TLS: ${MIKROTIK_USE_TLS:-false}
+      MIKROTIK_SKIP_TLS_VERIFY: ${MIKROTIK_SKIP_TLS_VERIFY:-false}
+      MIKROTIK_ZONES: ${MIKROTIK_ZONES:-}
+
   ddo-rfc2136:
-    image: ddo-rfc2136:dev
+    image: mrkhachaturov/ddo-rfc2136:dev
     build: ./sidecars/ddo-rfc2136
     environment:
       WEBHOOK_LISTEN: ":9090"
+      RFC2136_HOSTS: ${RFC2136_HOSTS:?set RFC2136_HOSTS in .env}
+      RFC2136_ZONES: ${RFC2136_ZONES:?set RFC2136_ZONES in .env}
       RFC2136_KERBEROS_REALM: ${RFC2136_KERBEROS_REALM:?set RFC2136_KERBEROS_REALM in .env}
       RFC2136_KERBEROS_PRINCIPAL: ${RFC2136_KERBEROS_PRINCIPAL:?set RFC2136_KERBEROS_PRINCIPAL in .env}
       RFC2136_KRB5_CONF: /etc/krb5.conf
       RFC2136_DRY_RUN: ${RFC2136_DRY_RUN:-false}
       # Pick exactly one auth mode by populating the matching var in .env.
-      # The other three must stay empty.
+      # The other must stay empty.
       RFC2136_AD_PASSWORD: ${RFC2136_AD_PASSWORD:-}
       RFC2136_KEYTAB_BASE64: ${RFC2136_KEYTAB_BASE64:-}
     volumes:

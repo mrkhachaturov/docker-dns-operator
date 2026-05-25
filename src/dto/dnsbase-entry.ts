@@ -19,10 +19,6 @@ export interface IProviderOptions {
     /** CloudFlare proxy toggle. Only meaningful for A and CNAME records. */
     proxy?: boolean;
   };
-  rfc2136?: {
-    /** Per-entry TTL override for the rfc2136 provider. */
-    ttl?: number;
-  };
   [key: string]: Record<string, unknown> | undefined;
 }
 

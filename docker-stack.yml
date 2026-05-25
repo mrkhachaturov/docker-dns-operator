@@ -27,17 +27,9 @@ services:
       PROJECT_LABEL: docker-dns-operator
       INSTANCE_ID: full-example-swarm
       EXECUTION_FREQUENCY_SECONDS: "30"
-      API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
-      MIKROTIK_BASEURL: ${MIKROTIK_BASEURL:?set MIKROTIK_BASEURL in .env}
-      MIKROTIK_USERNAME: ${MIKROTIK_USERNAME:?set MIKROTIK_USERNAME in .env}
-      MIKROTIK_PASSWORD: ${MIKROTIK_PASSWORD:?set MIKROTIK_PASSWORD in .env}
-      MIKROTIK_SKIP_TLS_VERIFY: ${MIKROTIK_SKIP_TLS_VERIFY:-true}
-      RFC2136_WEBHOOK_URL: http://ddo-rfc2136:9090
-      RFC2136_AUTH_MODE: gss-tsig
-      RFC2136_HOSTS: ${RFC2136_HOSTS:?set RFC2136_HOSTS in .env}
-      RFC2136_ZONES: ${RFC2136_ZONES:?set RFC2136_ZONES in .env}
-      RFC2136_KERBEROS_REALM: ${RFC2136_KERBEROS_REALM:?set RFC2136_KERBEROS_REALM in .env}
-      RFC2136_KERBEROS_PRINCIPAL: ${RFC2136_KERBEROS_PRINCIPAL:?set RFC2136_KERBEROS_PRINCIPAL in .env}
+      WEBHOOK_CF_URL: http://ddo-cloudflare:9090
+      WEBHOOK_MIKROTIK_URL: http://ddo-mikrotik:9090
+      WEBHOOK_RFC2136_URL: http://ddo-rfc2136:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     deploy:
@@ -47,10 +39,41 @@ services:
       restart_policy:
         condition: on-failure
 
-  ddo-rfc2136:
-    image: ddo-rfc2136:dev
+  ddo-cloudflare:
+    image: mrkhachaturov/ddo-cloudflare:dev
     environment:
       WEBHOOK_LISTEN: ":9090"
+      CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}
+      CLOUDFLARE_ZONES: ${CF_ZONES:-}
+      CLOUDFLARE_DEFAULT_TTL: ${CF_DEFAULT_TTL:-1}
+      CLOUDFLARE_PROXIED_DEFAULT: ${CF_PROXIED_DEFAULT:-false}
+    deploy:
+      restart_policy:
+        condition: on-failure
+
+  ddo-mikrotik:
+    image: mrkhachaturov/ddo-mikrotik:dev
+    environment:
+      WEBHOOK_LISTEN: ":9090"
+      MIKROTIK_ADDRESS: ${MIKROTIK_ADDRESS:?set MIKROTIK_ADDRESS in .env}
+      MIKROTIK_USERNAME: ${MIKROTIK_USERNAME:?set MIKROTIK_USERNAME in .env}
+      MIKROTIK_PASSWORD: ${MIKROTIK_PASSWORD:?set MIKROTIK_PASSWORD in .env}
+      MIKROTIK_USE_TLS: ${MIKROTIK_USE_TLS:-false}
+      MIKROTIK_SKIP_TLS_VERIFY: ${MIKROTIK_SKIP_TLS_VERIFY:-false}
+      MIKROTIK_ZONES: ${MIKROTIK_ZONES:-}
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  ddo-rfc2136:
+    image: mrkhachaturov/ddo-rfc2136:dev
+    environment:
+      WEBHOOK_LISTEN: ":9090"
+      RFC2136_HOSTS: ${RFC2136_HOSTS:?set RFC2136_HOSTS in .env}
+      RFC2136_ZONES: ${RFC2136_ZONES:?set RFC2136_ZONES in .env}
       RFC2136_KERBEROS_REALM: ${RFC2136_KERBEROS_REALM:?set RFC2136_KERBEROS_REALM in .env}
       RFC2136_KERBEROS_PRINCIPAL: ${RFC2136_KERBEROS_PRINCIPAL:?set RFC2136_KERBEROS_PRINCIPAL in .env}
       RFC2136_KRB5_CONF: /etc/krb5.conf

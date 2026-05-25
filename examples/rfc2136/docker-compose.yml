@@ -26,20 +26,17 @@ services:
       PROJECT_LABEL: docker-dns-operator
       INSTANCE_ID: rfc2136-example
       EXECUTION_FREQUENCY_SECONDS: 30
-      RFC2136_WEBHOOK_URL: http://ddo-rfc2136:9090
-      RFC2136_AUTH_MODE: gss-tsig
-      RFC2136_HOSTS: ${RFC2136_HOSTS:?set RFC2136_HOSTS in .env}
-      RFC2136_ZONES: ${RFC2136_ZONES:?set RFC2136_ZONES in .env}
-      RFC2136_KERBEROS_REALM: ${RFC2136_KERBEROS_REALM:?set RFC2136_KERBEROS_REALM in .env}
-      RFC2136_KERBEROS_PRINCIPAL: ${RFC2136_KERBEROS_PRINCIPAL:?set RFC2136_KERBEROS_PRINCIPAL in .env}
+      WEBHOOK_RFC2136_URL: http://ddo-rfc2136:9090
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   ddo-rfc2136:
-    image: ddo-rfc2136:dev
+    image: mrkhachaturov/ddo-rfc2136:dev
     build: ../../sidecars/ddo-rfc2136
     environment:
       WEBHOOK_LISTEN: ":9090"
+      RFC2136_HOSTS: ${RFC2136_HOSTS:?set RFC2136_HOSTS in .env}
+      RFC2136_ZONES: ${RFC2136_ZONES:?set RFC2136_ZONES in .env}
       RFC2136_KERBEROS_REALM: ${RFC2136_KERBEROS_REALM:?set RFC2136_KERBEROS_REALM in .env}
       RFC2136_KERBEROS_PRINCIPAL: ${RFC2136_KERBEROS_PRINCIPAL:?set RFC2136_KERBEROS_PRINCIPAL in .env}
       RFC2136_KRB5_CONF: /etc/krb5.conf

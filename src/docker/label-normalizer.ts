@@ -15,7 +15,10 @@ export function normalizeProviders(
   // `providers` field takes precedence over `provider`
   const raw = rawProviders !== undefined ? rawProviders : rawProvider;
 
-  // Absent: backward compatibility — default to CloudFlare
+  // Absent: backward compatibility — default to "cf" so a user upgrading from
+  // the in-process CloudFlare provider only has to add WEBHOOK_CF_URL to keep
+  // routing working. If "cf" isn't registered, the strict-routing guard in
+  // app.service surfaces a clear error.
   if (raw === undefined || raw === null) return ['cf'];
 
   // String (including "all")
@@ -55,8 +58,8 @@ export function parseProxyBoolean(value: unknown): boolean | null {
 
 /**
  * Extracts provider-specific options from a raw label entry object.
- * Supports cf (proxy) and rfc2136 (ttl). Returns null on any malformed value
- * so the caller can warn and skip the entry.
+ * Supports cf (proxy). Returns null on any malformed value so the caller
+ * can warn and skip the entry.
  */
 export function normalizeProviderOptions(
   raw: Record<string, unknown>,
@@ -74,18 +77,6 @@ export function normalizeProviderOptions(
     const parsed = parseProxyBoolean(raw.proxy);
     if (parsed === null) return null;
     out.cf = { proxy: parsed };
-  }
-
-  // rfc2136: nested form only — no legacy top-level shortcut.
-  const rfc2136Ttl = (raw.providerOptions as Record<string, any> | undefined)
-    ?.rfc2136?.ttl;
-  if (rfc2136Ttl !== undefined) {
-    const n =
-      typeof rfc2136Ttl === 'number'
-        ? rfc2136Ttl
-        : Number.parseInt(String(rfc2136Ttl), 10);
-    if (!Number.isFinite(n) || n <= 0) return null;
-    out.rfc2136 = { ttl: n };
   }
 
   if (Object.keys(out).length === 0) return undefined;

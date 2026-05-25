@@ -98,38 +98,3 @@ describe('normalizeProviderOptions', () => {
     ).toEqual({ cf: { proxy: false } });
   });
 });
-
-describe('normalizeProviderOptions — rfc2136', () => {
-  it('parses providerOptions.rfc2136.ttl from a raw entry object', () => {
-    const result = normalizeProviderOptions({
-      providerOptions: { rfc2136: { ttl: 900 } },
-    });
-    expect(result?.rfc2136?.ttl).toBe(900);
-  });
-
-  it('coexists with cf.proxy in the same entry', () => {
-    const result = normalizeProviderOptions({
-      providerOptions: { cf: { proxy: false }, rfc2136: { ttl: 600 } },
-    });
-    expect(result?.cf?.proxy).toBe(false);
-    expect(result?.rfc2136?.ttl).toBe(600);
-  });
-
-  it('returns undefined when neither cf nor rfc2136 options are set', () => {
-    expect(normalizeProviderOptions({})?.rfc2136).toBeUndefined();
-  });
-
-  it('rejects non-numeric or non-positive ttl as malformed (returns null)', () => {
-    expect(
-      normalizeProviderOptions({
-        providerOptions: { rfc2136: { ttl: 'abc' } },
-      }),
-    ).toBeNull();
-    expect(
-      normalizeProviderOptions({ providerOptions: { rfc2136: { ttl: 0 } } }),
-    ).toBeNull();
-    expect(
-      normalizeProviderOptions({ providerOptions: { rfc2136: { ttl: -1 } } }),
-    ).toBeNull();
-  });
-});

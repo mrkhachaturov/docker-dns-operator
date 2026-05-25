@@ -21,26 +21,12 @@ export class ProviderRegistry {
     }
     if (this.registry.size === 0) {
       throw new Error(
-        'ProviderRegistry: No providers configured. Set credentials for at least one provider (CF or MikroTik).',
+        'ProviderRegistry: No providers configured. Declare at least one WEBHOOK_<NAME>_URL sidecar.',
       );
     }
   }
 
   getAll(): IDnsProvider[] {
     return [...this.registry.values()];
-  }
-
-  resolve(keys: string[]): IDnsProvider[] {
-    if (keys.includes('all')) return this.getAll();
-    return keys.flatMap((key) => {
-      const provider = this.registry.get(key);
-      if (!provider) {
-        this.loggerService.warn(
-          `ProviderRegistry: unknown or unconfigured provider '${key}', skipping`,
-        );
-        return [];
-      }
-      return [provider];
-    });
   }
 }

@@ -10,7 +10,8 @@ Guidance for Claude Code (and other AI assistants) when working in this reposito
 Fork of [timk153/docker-external-dns](https://github.com/timk153/docker-external-dns) that
 adds:
 
-- **MikroTik RouterOS** provider (alongside CloudFlare)
+- **Sidecar-based DNS providers** — every backend (Cloudflare, MikroTik, RFC 2136) runs
+  as its own webhook sidecar discovered via `WEBHOOK_<NAME>_URL` env vars
 - **Per-entry provider routing** via a `providers` label
 - **Docker Swarm** discovery (auto-detected at startup via `docker info`)
 
@@ -38,14 +39,14 @@ src/
 ├── app.service.ts             Top-level reconciliation orchestrator
 ├── app.configuration.ts       Joi-validated env config
 ├── app.functions.ts           Pure helpers (diffing, routing)
-├── cloud-flare/               CloudFlare provider impl
-├── mikrotik/                  MikroTik RouterOS provider impl
+├── webhook-provider/          Generic external-dns webhook v1 client + registry
 ├── docker/                    Docker / Swarm source — label parsing
 ├── providers/                 Provider interface + registry
 ├── ddns/                      DDNS (public IP) service
 ├── cron/                      CRON scheduler
-├── dto/, validators/, errors/, providers/, @types/
+├── dto/, validators/, errors/, @types/
 └── main.ts                    Nest bootstrap
+sidecars/                      Submodules: ddo-cloudflare / ddo-mikrotik / ddo-rfc2136
 test/                          e2e specs (jest-e2e.json)
 ```
 
@@ -73,10 +74,11 @@ for verification.
 
 - **Provider abstraction** — every provider implements `DnsProvider` in
   [src/providers/dns-provider.interface.ts](src/providers/dns-provider.interface.ts).
-  Adding a new provider means: implementing that interface, registering in
-  [provider-registry.service.ts](src/providers/provider-registry.service.ts), wiring config
-  in [app.configuration.ts](src/app.configuration.ts), and updating
-  [app.module.ts](src/app.module.ts).
+  Every backend is a webhook sidecar speaking the external-dns webhook v1 contract;
+  adding a new one means publishing a sidecar repo and pointing the operator at it
+  via a `WEBHOOK_<NAME>_URL` env var. Discovery lives in
+  [src/webhook-provider/registry.ts](src/webhook-provider/registry.ts) — no
+  operator-side code changes for new backends.
 - **Per-entry routing** — each discovered DNS entry carries a `providers` field. The
   reconciler fans out entries to the providers named in that field. Empty/missing means
   "all enabled providers."
