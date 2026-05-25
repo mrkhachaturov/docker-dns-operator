@@ -135,11 +135,6 @@ export class DockerService {
       this.swarmMode = false;
     }
 
-    if (this.swarmMode && this.preserveStopped) {
-      this.loggerService.warn(
-        'DockerService, resolveSwarmMode: PRESERVE_STOPPED has no effect on a swarm manager (services are always listed)',
-      );
-    }
     return this.swarmMode;
   }
 
@@ -167,17 +162,32 @@ export class DockerService {
       }
 
       // Swarm mode: listServices uses a raw object filter (NOT JSON.stringify).
+      // status: true asks the daemon to populate ServiceStatus.RunningTasks /
+      // DesiredTasks — without it the field is nil and we can't tell a healthy
+      // service from a degraded/scaled-down one.
       const services = await this.docker.listServices({
         filters: { label: [this.dockerLabel] },
+        status: true,
       });
 
-      // Only use Spec.Labels (set by deploy.labels in compose).
+      // Only use Spec.Labels (set by deploy.labels in compose). Treat a service
+      // with RunningTasks == 0 the same way listContainers treats an `exited`
+      // container: include only when PRESERVE_STOPPED=true. Services missing
+      // from listServices entirely (docker stack rm / docker service rm) are
+      // the analog of `docker rm` and always drop out.
       const sources = services
         .map((service): DockerSource | null => {
           const labels = service.Spec?.Labels;
           if (!labels) {
             this.loggerService.warn(
               `DockerService, getSources: service ${service.ID} has no labels, skipping`,
+            );
+            return null;
+          }
+          const running = service.ServiceStatus?.RunningTasks ?? 0;
+          if (running === 0 && !this.preserveStopped) {
+            this.loggerService.debug(
+              `DockerService, getSources: skipping service ${service.Spec?.Name ?? service.ID} (RunningTasks=0, PRESERVE_STOPPED=false)`,
             );
             return null;
           }

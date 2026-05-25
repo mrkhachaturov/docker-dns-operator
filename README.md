@@ -220,7 +220,7 @@ A typo in `providers: [...]` (e.g. `mikrotic-home`) causes that entry to fail re
 | `INSTANCE_ID` | `1` | Second half of the label key. Combined as `${PROJECT_LABEL}:${INSTANCE_ID}`. |
 | `EXECUTION_FREQUENCY_SECONDS` | `60` | Reconciliation interval. Integer ≥ 1. |
 | `DDNS_EXECUTION_FREQUENCY_MINUTES` | `60` | Public IP check interval. Only active when an entry uses `"address": "DDNS"`. |
-| `PRESERVE_STOPPED` | `false` | If `true`, stopped containers keep their DNS entries. Removed containers always lose them. Ignored on a Swarm manager. |
+| `PRESERVE_STOPPED` | `false` | If `true`, stopped containers (standalone) or services with `RunningTasks=0` (Swarm) keep their DNS entries. Removed containers / removed services always lose them. |
 | `LOG_LEVEL` | `error` | One of `fatal`, `error`, `warn`, `log`, `debug`, `verbose`. |
 
 </details>
@@ -555,7 +555,7 @@ services:
         docker-dns-operator:1: '[{ "type": "A", "name": "app.example.com", "address": "1.2.3.4" }]'
 ```
 
-`PRESERVE_STOPPED` has no effect in Swarm mode. The operator must run on a manager node so it can list services.
+`PRESERVE_STOPPED` in Swarm mode keeps DNS for services whose `ServiceStatus.RunningTasks` is `0` (scaled-down, crash-looping, or otherwise unhealthy) as long as the service still exists. Removing the service (`docker service rm` / `docker stack rm`) always drops the records. The operator must run on a manager node so it can list services.
 
 </details>
 

@@ -333,7 +333,10 @@ describe('DockerService (Integration)', () => {
     });
 
     it('should discover swarm services via getSources() with label filter', async () => {
-      // arrange — create a service with the DNS label
+      // arrange — create a service with the DNS label. Replicas:0 keeps the
+      // test fast (no image pull / task scheduling), but with RunningTasks=0
+      // the service is only visible to getSources() when PRESERVE_STOPPED=true.
+      process.env.PRESERVE_STOPPED = 'true';
       const entry = validDnsAEntry(DnsaEntry, { name: 'swarm.testdomain.com' });
       entry.providers = ['cf'];
 

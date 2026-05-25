@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-05-25
+
+### Changed
+- `PRESERVE_STOPPED` is now honoured in Swarm mode. The operator queries `listServices` with `status: true` and filters services whose `ServiceStatus.RunningTasks` is `0` the same way it filters `exited` containers in standalone mode: included only when `PRESERVE_STOPPED=true`. The standalone-vs-swarm mapping is now consistent — both modes treat a removed workload (`docker rm` / `docker service rm`) as record-drop, and a "deployment exists but not running" state (crash loop, scaled to 0, image pull failure) as governed by `PRESERVE_STOPPED`.
+- Removed the startup warning `"PRESERVE_STOPPED has no effect on a swarm manager"` — the flag is no longer a no-op there.
+
 ## [0.1.0] — 2026-05-25
 
 First tagged release of the sidecar-based architecture.
@@ -32,5 +38,6 @@ First tagged release of the sidecar-based architecture.
 - Forked from [timk153/docker-external-dns](https://github.com/timk153/docker-external-dns); diverged substantially.
 - See [README.md](README.md) for the full configuration reference and examples.
 
-[Unreleased]: https://github.com/mrkhachaturov/docker-dns-operator/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mrkhachaturov/docker-dns-operator/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/mrkhachaturov/docker-dns-operator/releases/tag/v0.1.1
 [0.1.0]: https://github.com/mrkhachaturov/docker-dns-operator/releases/tag/v0.1.0

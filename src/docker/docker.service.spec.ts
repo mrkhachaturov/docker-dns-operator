@@ -308,11 +308,15 @@ describe('DockerService', () => {
         sut['swarmMode'] = true;
       });
 
-      it('should call listServices with raw object filter and map to DockerSource', async () => {
+      it('should call listServices with status:true and raw object filter and map to DockerSource', async () => {
         // arrange
         const mockService = createMock<Docker.Service>();
         mockService.ID = mockServiceId;
         mockService.Spec = { Labels: mockLabels } as any;
+        mockService.ServiceStatus = {
+          RunningTasks: 1,
+          DesiredTasks: 1,
+        } as any;
         mockDockerFactoryGetValue.listServices.mockResolvedValueOnce([
           mockService,
         ]);
@@ -324,6 +328,7 @@ describe('DockerService', () => {
         expect(result).toEqual([{ Id: mockServiceId, Labels: mockLabels }]);
         expect(mockDockerFactoryGetValue.listServices).toHaveBeenCalledWith({
           filters: { label: [expectedDockerLabel] },
+          status: true,
         });
         expect(mockDockerFactoryGetValue.listContainers).not.toHaveBeenCalled();
       });
@@ -362,26 +367,66 @@ describe('DockerService', () => {
         await expect(async () => sut.getSources()).rejects.toThrow(error);
       });
 
-      it('should warn if PRESERVE_STOPPED is also true on a swarm manager', async () => {
-        // arrange — manager-capable daemon + preserve-stopped on
-        (mockDockerFactoryGetValue as any).info = jest.fn().mockResolvedValue({
-          Swarm: { LocalNodeState: 'active', ControlAvailable: true },
-        });
-        mockConfigService.get.mockImplementation((key) => {
-          if (key === 'PRESERVE_STOPPED') return true;
-          return mockConfigServiceGetValue[key];
-        });
-        sut['state'] = States.Unintialized;
-        delete sut['swarmMode'];
-        sut.initialize();
+      it('should skip service when RunningTasks=0 and PRESERVE_STOPPED=false', async () => {
+        // arrange — service exists but has zero running tasks (crash loop /
+        // scaled to 0). PRESERVE_STOPPED=false is the default in this suite.
+        const mockService = createMock<Docker.Service>();
+        mockService.ID = mockServiceId;
+        mockService.Spec = { Labels: mockLabels, Name: 'svc-name' } as any;
+        mockService.ServiceStatus = {
+          RunningTasks: 0,
+          DesiredTasks: 1,
+        } as any;
+        mockDockerFactoryGetValue.listServices.mockResolvedValueOnce([
+          mockService,
+        ]);
 
-        // act — the warning lives in resolveSwarmMode, triggered on first getSources
-        await sut.getSources();
+        // act
+        const result = await sut.getSources();
 
         // assert
-        expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
-          'DockerService, resolveSwarmMode: PRESERVE_STOPPED has no effect on a swarm manager (services are always listed)',
-        );
+        expect(result).toEqual([]);
+      });
+
+      it('should include service when RunningTasks=0 and PRESERVE_STOPPED=true', async () => {
+        // arrange — same service but operator is configured to keep DNS for
+        // stopped/degraded services. Standalone analog: exited container with
+        // `all=true` on listContainers.
+        sut['preserveStopped'] = true;
+        const mockService = createMock<Docker.Service>();
+        mockService.ID = mockServiceId;
+        mockService.Spec = { Labels: mockLabels, Name: 'svc-name' } as any;
+        mockService.ServiceStatus = {
+          RunningTasks: 0,
+          DesiredTasks: 1,
+        } as any;
+        mockDockerFactoryGetValue.listServices.mockResolvedValueOnce([
+          mockService,
+        ]);
+
+        // act
+        const result = await sut.getSources();
+
+        // assert
+        expect(result).toEqual([{ Id: mockServiceId, Labels: mockLabels }]);
+      });
+
+      it('should treat missing ServiceStatus as RunningTasks=0 (defensive)', async () => {
+        // arrange — older daemon or unexpected API shape: ServiceStatus may be
+        // absent. Conservative: treat as 0 running, defer to PRESERVE_STOPPED.
+        const mockService = createMock<Docker.Service>();
+        mockService.ID = mockServiceId;
+        mockService.Spec = { Labels: mockLabels, Name: 'svc-name' } as any;
+        mockService.ServiceStatus = undefined;
+        mockDockerFactoryGetValue.listServices.mockResolvedValueOnce([
+          mockService,
+        ]);
+
+        // act
+        const result = await sut.getSources();
+
+        // assert
+        expect(result).toEqual([]);
       });
     });
 
