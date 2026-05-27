@@ -26,6 +26,29 @@ export class ProviderRegistry {
     }
   }
 
+  /**
+   * Runs each provider's optional negotiate() hook in parallel so a slow
+   * sidecar can't single-handedly delay boot. Per-provider errors are
+   * caught here — each provider's own negotiate() is contracted to log
+   * its own WARN, but we belt-and-brace at this layer so a buggy
+   * implementation that throws can't take the whole boot down.
+   */
+  async negotiateAll(): Promise<void> {
+    const provs = [...this.registry.values()].filter(
+      (p): p is IDnsProvider & { negotiate: () => Promise<void> } =>
+        typeof p.negotiate === 'function',
+    );
+    const results = await Promise.allSettled(provs.map((p) => p.negotiate()));
+    results.forEach((r, i) => {
+      if (r.status !== 'rejected') return;
+      const reason =
+        r.reason instanceof Error ? r.reason.message : String(r.reason);
+      this.loggerService.warn(
+        `ProviderRegistry: negotiate threw for ${provs[i].providerKey}: ${reason} — provider will match-all by default.`,
+      );
+    });
+  }
+
   getAll(): IDnsProvider[] {
     return [...this.registry.values()];
   }

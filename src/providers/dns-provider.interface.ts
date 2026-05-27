@@ -20,6 +20,32 @@ export interface IDnsProvider {
   initialize(): void;
 
   /**
+   * Called once at startup, after initialize(), to discover provider-side
+   * constraints — primarily the DomainFilter (which zones the provider
+   * actually serves) per the external-dns webhook v1 negotiation
+   * contract. Result is cached for the operator's lifetime; a zone change
+   * on the sidecar needs an operator restart.
+   *
+   * Optional: providers that don't expose a negotiation endpoint can
+   * omit this. Implementations must NOT throw on transient negotiation
+   * failure — log + fail-open (matchesDomain returns true) so a single
+   * misbehaving sidecar doesn't stop the operator from booting.
+   */
+  negotiate?(): Promise<void>;
+
+  /**
+   * Returns true if the given record name falls inside this provider's
+   * zone scope (computed from the negotiated DomainFilter). Used by the
+   * reconciler to pre-filter records before any apply attempt, so a
+   * record going to the wrong sidecar is dropped at the operator layer
+   * with a single named WARN instead of a per-cycle sidecar 4xx.
+   *
+   * Optional: providers without a notion of "domain filter" can omit
+   * this — the reconciler treats absence as match-all.
+   */
+  matchesDomain?(name: string): boolean;
+
+  /**
    * Called once per sync job before getRecords/createEntry etc.
    * Use for per-job setup such as fetching and caching zones.
    * Optional: only called if implemented.

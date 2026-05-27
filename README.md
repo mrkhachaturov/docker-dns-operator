@@ -176,6 +176,9 @@ The **sidecar** implements failover across multiple DCs (`RFC2136_HOSTS` env on 
 > [!CAUTION]
 > `RFC2136_HOSTS` (on the sidecar) must contain real DNS hostnames of your DCs. IPs and bare hostnames are rejected at startup. AD's Kerberos service principal is bound to the host you contact; an IP or short name produces `KDC_ERR_S_PRINCIPAL_UNKNOWN` or `KDC_ERR_WRONG_REALM` on every cycle.
 
+> [!CAUTION]
+> The **Kerberos realm** portion of a principal is case-sensitive and must match what your KDC issues — uppercase by convention (`AD.EXAMPLE.ORG`, not `ad.example.org`). Three places this bites: the `[realms]` / `[domain_realm]` keys in `krb5.conf`, the service-account principal you pass to the sidecar (`svc@AD.EXAMPLE.ORG`), and the keytab itself (`ktpass.exe` bakes the realm verbatim — regenerate if the case is wrong). Verify with `klist -k /path/to/keytab`. The DNS zone case is independent and follows DNS rules (case-insensitive).
+
 See [docs/rfc2136-integration-runbook.md](docs/rfc2136-integration-runbook.md) for keytab generation, AD permission setup, and the full deployment walkthrough.
 
 ### 🔌 Generic webhook sidecars
@@ -228,7 +231,7 @@ See [Configuration » `WEBHOOK_TIMEOUT_SECONDS`](#️-environment-variables) for
 To plug a 4th backend in without touching operator code, your sidecar needs:
 
 1. **External-dns webhook v1 endpoints** — the operator calls:
-   - `GET /` — capability negotiation. Return `application/external.dns.webhook+json;version=1` content type with the operator's `DomainFilter` echoed back (the operator doesn't enforce any extra fields beyond what external-dns specifies).
+   - `GET /` — capability negotiation. Return `application/external.dns.webhook+json;version=1` with the sidecar's `DomainFilter` — the zones you actually serve — as `{"include": ["zone1.example.com", "zone2.example.com"]}`. The operator caches this at startup and pre-filters records by zone before the apply pass, so an entry whose name falls outside any registered sidecar's zones is dropped at the operator with a named WARN instead of round-tripping a sidecar 4xx. **Do not emit the legacy `{"filters": [...]}` shape** — upstream external-dns parses that as "no filter, accept everything", which defeats the whole point.
    - `GET /records` — current set of records the sidecar is responsible for. The operator filters by ownership (`labels.owner`) on its side, but you SHOULD honour `labels.owner` round-trips on every record (see #3).
    - `POST /records` — apply a `Changes` payload (`Create`/`UpdateOld`/`UpdateNew`/`Delete`).
    - Optionally `POST /adjustendpoints` — leave it as identity if you have nothing to normalize.

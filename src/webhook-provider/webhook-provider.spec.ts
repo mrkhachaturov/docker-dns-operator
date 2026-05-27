@@ -4,7 +4,7 @@ import { DnsCnameEntry } from '../dto/dnscname-entry';
 import { DNSTypes } from '../dto/dnsbase-entry';
 import { ConsoleLoggerService } from '../logger.service';
 import { OWNER_LABEL_KEY } from './endpoint-mapping';
-import { Changes, Endpoint, WebhookResult } from './types';
+import { Changes, DomainFilter, Endpoint, WebhookResult } from './types';
 import { WebhookProvider } from './webhook-provider';
 import { WebhookProviderRecord } from './webhook-provider-record';
 
@@ -19,6 +19,13 @@ class FakeClient {
 
   applyResult: WebhookResult<void> = { ok: true, value: undefined };
 
+  negotiateResult: WebhookResult<DomainFilter> = {
+    ok: true,
+    value: {},
+  };
+
+  negotiateCallCount = 0;
+
   async getRecords(): Promise<WebhookResult<Endpoint[]>> {
     return this.getRecordsResult;
   }
@@ -26,6 +33,11 @@ class FakeClient {
   async applyChanges(c: Changes): Promise<WebhookResult<void>> {
     this.applyCalls.push(c);
     return this.applyResult;
+  }
+
+  async negotiate(): Promise<WebhookResult<DomainFilter>> {
+    this.negotiateCallCount += 1;
+    return this.negotiateResult;
   }
 }
 
@@ -70,6 +82,86 @@ describe('WebhookProvider', () => {
         stubLogger(),
       );
       expect(() => sut.initialize()).not.toThrow();
+    });
+  });
+
+  describe('negotiate', () => {
+    it('calls the sidecar GET / once and caches the returned DomainFilter', async () => {
+      const client = new FakeClient();
+      client.negotiateResult = {
+        ok: true,
+        value: { include: ['example.com', 'internal.example.com'] },
+      };
+      const sut = new WebhookProvider(
+        'cf',
+        client as never,
+        OWNER,
+        stubLogger(),
+      );
+
+      await sut.negotiate();
+
+      expect(client.negotiateCallCount).toBe(1);
+      // Now domain matching should use the cached filter.
+      expect(sut.matchesDomain('app.example.com')).toBe(true);
+      expect(sut.matchesDomain('other.com')).toBe(false);
+    });
+
+    it('matchesDomain returns true (match-all) before negotiate has run', () => {
+      // Fail-open default — a provider that hasn't negotiated yet, or whose
+      // negotiate failed, must not silently drop every record. The user can
+      // see the WARN in the log; the operator keeps trying to apply.
+      const sut = new WebhookProvider(
+        'cf',
+        new FakeClient() as never,
+        OWNER,
+        stubLogger(),
+      );
+      expect(sut.matchesDomain('anything.example.com')).toBe(true);
+    });
+
+    it('on failure, logs WARN and leaves the filter unset (match-all fail-open)', async () => {
+      const client = new FakeClient();
+      client.negotiateResult = {
+        ok: false,
+        retryable: true,
+        message: 'connect ECONNREFUSED 127.0.0.1:9090',
+      };
+      const logger = stubLogger();
+      const sut = new WebhookProvider(
+        'cf-down',
+        client as never,
+        OWNER,
+        logger,
+      );
+
+      await sut.negotiate();
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('cf-down'),
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('ECONNREFUSED'),
+      );
+      // Fail-open: a record outside any zone still matches → operator will
+      // still attempt to send it, sidecar will either accept (zone came up)
+      // or reject (operator surfaces per-entry WARN).
+      expect(sut.matchesDomain('anything.example.com')).toBe(true);
+    });
+
+    it('empty include + no exclude is "no filter" → match-all', async () => {
+      const client = new FakeClient();
+      client.negotiateResult = { ok: true, value: {} };
+      const sut = new WebhookProvider(
+        'cf',
+        client as never,
+        OWNER,
+        stubLogger(),
+      );
+
+      await sut.negotiate();
+
+      expect(sut.matchesDomain('anything.com')).toBe(true);
     });
   });
 

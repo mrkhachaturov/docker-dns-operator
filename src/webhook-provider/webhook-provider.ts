@@ -2,8 +2,9 @@ import { DnsbaseEntry } from '../dto/dnsbase-entry';
 import { ConsoleLoggerService } from '../logger.service';
 import { IDnsProvider } from '../providers/dns-provider.interface';
 import { IProviderRecord } from '../providers/provider-record.interface';
+import { matchDomain } from './domain-filter';
 import { OWNER_LABEL_KEY, dnsEntryToEndpoint } from './endpoint-mapping';
-import { Endpoint } from './types';
+import { DomainFilter, Endpoint } from './types';
 import { WebhookClient } from './webhook-client';
 import { WebhookProviderRecord } from './webhook-provider-record';
 
@@ -27,6 +28,15 @@ import { WebhookProviderRecord } from './webhook-provider-record';
  * conditional updates) we'll add a finalizeJob() hook later.
  */
 export class WebhookProvider implements IDnsProvider {
+  /**
+   * Cached DomainFilter from the most recent successful negotiate() call.
+   * `undefined` means "not yet negotiated, or negotiation failed" — both
+   * are treated as match-all by matchesDomain() for fail-open behavior.
+   * Resolved once at startup; upstream external-dns also caches per-process
+   * lifecycle, so a zone change on the sidecar needs an operator restart.
+   */
+  private domainFilter?: DomainFilter;
+
   constructor(
     public readonly providerKey: string,
     private readonly client: WebhookClient,
@@ -42,6 +52,46 @@ export class WebhookProvider implements IDnsProvider {
   // eslint-disable-next-line class-methods-use-this
   initialize(): void {
     // No-op. URL was validated when the registry built this instance.
+  }
+
+  /**
+   * Hits the sidecar's GET / endpoint to discover which zones it serves,
+   * per the external-dns webhook v1 negotiation contract. The result is
+   * cached for the lifetime of this WebhookProvider instance and consulted
+   * by matchesDomain() to pre-filter records before any apply attempt.
+   *
+   * Failure (network error, malformed payload, non-2xx) is logged at WARN
+   * and leaves the cached filter unset — matchesDomain then returns true
+   * for every name, so a transient negotiation failure does not silently
+   * stop record propagation. The user sees the WARN; reconciliation keeps
+   * trying through the normal apply path, which would surface a per-entry
+   * WARN if the sidecar then 4xx's the record.
+   */
+  async negotiate(): Promise<void> {
+    const result = await this.client.negotiate();
+    if (!result.ok) {
+      this.logger.warn(
+        `WebhookProvider[${this.providerKey}] negotiate failed: ${result.message} — proceeding without domain filter (match-all).`,
+      );
+      return;
+    }
+    this.domainFilter = result.value;
+    const include = result.value.include ?? [];
+    const exclude = result.value.exclude ?? [];
+    this.logger.log(
+      `WebhookProvider[${this.providerKey}] negotiated zones — include=[${include.join(', ') || '*'}]${
+        exclude.length > 0 ? ` exclude=[${exclude.join(', ')}]` : ''
+      }`,
+    );
+  }
+
+  /**
+   * Returns true if `name` falls inside this provider's zone scope.
+   * Before negotiate() runs (or after a failed negotiation) this is
+   * always true — see the domainFilter field comment for why.
+   */
+  matchesDomain(name: string): boolean {
+    return matchDomain(this.domainFilter, name);
   }
 
   async getRecords(): Promise<IProviderRecord[]> {
