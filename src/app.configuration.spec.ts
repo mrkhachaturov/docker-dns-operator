@@ -97,6 +97,38 @@ describe('App Configuration', () => {
     }
   });
 
+  it('should normalize LOG_LEVEL=info to "log"', async () => {
+    const spyLoadConfigurationComposedConstants = jest
+      .spyOn(ConfigurationModule, 'loadConfigurationComposedConstants')
+      .mockReturnValue({ ENTRY_IDENTIFIER: '' });
+
+    try {
+      process.env.PROJECT_LABEL = 'label';
+      process.env.INSTANCE_ID = '1';
+      process.env.EXECUTION_FREQUENCY_SECONDS = '60';
+      process.env.LOG_LEVEL = 'info';
+      process.env.PRESERVE_STOPPED = 'false';
+
+      const sut = await getSystemUnderTest();
+
+      // 'info' is accepted as a familiar alias from other logging ecosystems
+      // and normalized to NestJS's native 'log' level.
+      expect(sut.get('LOG_LEVEL', { infer: true })).toEqual('log');
+    } finally {
+      spyLoadConfigurationComposedConstants.mockRestore();
+    }
+  });
+
+  it('should reject LOG_LEVEL=trace as invalid', async () => {
+    process.env.PROJECT_LABEL = 'label';
+    process.env.INSTANCE_ID = '1';
+    process.env.EXECUTION_FREQUENCY_SECONDS = '60';
+    process.env.LOG_LEVEL = 'trace';
+    process.env.PRESERVE_STOPPED = 'false';
+
+    await expect(getSystemUnderTest()).rejects.toThrow(/LOG_LEVEL/);
+  });
+
   describe('loadConfigurationComposedConstants', () => {
     it('should compose ENTRY_IDENTIFIER', async () => {
       const paramProjectLabel = 'project-label';

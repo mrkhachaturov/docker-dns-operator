@@ -26,7 +26,7 @@ async function bootstrap() {
   app.useLogger(await app.resolve(ConsoleLoggerService));
   app.enableShutdownHooks();
   const appService = app.get(AppService);
-  appService.initialize();
+  await appService.initialize();
 
   // Bind /healthz first so the probe is reachable from t=0; the reconcile
   // loop's first tick can take a few seconds (Docker info, sidecar fetches).

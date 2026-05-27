@@ -89,9 +89,15 @@ export class AppService implements OnModuleDestroy {
 
   /**
    * Initialize AppService.
-   * Initializes the provider registry and Docker service.
+   *
+   * Two-phase: (1) sync init of registry + Docker service, then (2) the
+   * async negotiate pass that fetches each sidecar's DomainFilter. The
+   * negotiation runs at boot only — upstream external-dns caches it
+   * per-process for the same reason, so a zone change on a sidecar
+   * requires an operator restart. Negotiation failure is non-fatal:
+   * each provider falls back to match-all and reconciliation proceeds.
    */
-  initialize() {
+  async initialize(): Promise<void> {
     if (this.state === State.Initialized)
       throw Error(
         'AppService, initialize: Already initialized, but attempted to initialize again',
@@ -99,6 +105,7 @@ export class AppService implements OnModuleDestroy {
 
     this.providerRegistry.initialize();
     this.dockerService.initialize();
+    await this.providerRegistry.negotiateAll();
     this.state = State.Initialized;
   }
 
@@ -263,11 +270,25 @@ export class AppService implements OnModuleDestroy {
           (e.providers ?? ['cf']).includes('all'),
       );
 
+      // Domain pre-routing: drop entries whose name falls outside this
+      // provider's zone scope (from the sidecar's DomainFilter). Without
+      // this step the sidecar would silently refuse the record and the
+      // failure would only surface in the sidecar's own log — see
+      // src/webhook-provider/domain-filter.ts and the negotiate() hook.
+      // Providers without matchesDomain (e.g. legacy non-webhook impls)
+      // fall through unchanged.
+      const inZone = provider.matchesDomain
+        ? targeted.filter((e) => {
+            if (provider.matchesDomain!(e.name)) return true;
+            this.loggerService.warn(
+              `AppService: entry ${e.Key} (${e.type} ${e.name}) routed to provider '${provider.providerKey}' which does not serve that zone — entry skipped for this provider.`,
+            );
+            return false;
+          })
+        : targeted;
+
       // Per-provider deduplication
-      const deduplicated = this.dedupeForProvider(
-        targeted,
-        provider.providerKey,
-      );
+      const deduplicated = this.dedupeForProvider(inZone, provider.providerKey);
 
       // Fetch current state from provider
       // eslint-disable-next-line no-await-in-loop
@@ -276,21 +297,54 @@ export class AppService implements OnModuleDestroy {
       // Compute diff
       const diff = computeSetDifference(deduplicated, providerRecords);
 
-      // Apply diff
+      // Apply diff. Per-entry isolation: one bad record (e.g. sidecar
+      // refuses with "not in zone", auth flap, transient 5xx) must not
+      // abort the rest of the cycle — Promise.all would, allSettled
+      // lets every operation report independently. Failures are logged
+      // by entry key + operation + reason so the operator log alone
+      // tells the user which record was rejected and why, without
+      // having to read the sidecar's own logs.
+      const ops: Array<{
+        kind: 'create' | 'update' | 'delete';
+        key: string;
+        promise: Promise<void>;
+      }> = [
+        ...diff.add.map((e) => ({
+          kind: 'create' as const,
+          key: e.Key,
+          promise: provider.createEntry(e),
+        })),
+        ...diff.update.map(({ old, update }) => ({
+          kind: 'update' as const,
+          key: update.Key,
+          promise: provider.updateEntry(old, update),
+        })),
+        ...diff.delete.map((r) => ({
+          kind: 'delete' as const,
+          key: r.Key,
+          promise: provider.deleteEntry(r),
+        })),
+      ];
+
       // eslint-disable-next-line no-await-in-loop
-      await Promise.all([
-        ...diff.add.map((e) => provider.createEntry(e)),
-        ...diff.update.map(({ old, update }) =>
-          provider.updateEntry(old, update),
-        ),
-        ...diff.delete.map((e) => provider.deleteEntry(e)),
-      ]);
+      const results = await Promise.allSettled(ops.map((o) => o.promise));
+      let failureCount = 0;
+      results.forEach((r, i) => {
+        if (r.status !== 'rejected') return;
+        failureCount += 1;
+        const op = ops[i];
+        const reason =
+          r.reason instanceof Error ? r.reason.message : String(r.reason);
+        this.loggerService.warn(
+          `[${provider.providerKey}] ${op.kind} ${op.key} failed: ${reason}`,
+        );
+      });
 
       const totalChanges =
         diff.add.length + diff.update.length + diff.delete.length;
-      if (totalChanges > 0) {
+      if (totalChanges > 0 || failureCount > 0) {
         this.loggerService.log(
-          `[${provider.providerKey}] Synchronisation complete: Added ${diff.add.length}, Updated ${diff.update.length}, Deleted ${diff.delete.length}, Unchanged ${diff.unchanged.length}`,
+          `[${provider.providerKey}] Synchronisation complete: Added ${diff.add.length}, Updated ${diff.update.length}, Deleted ${diff.delete.length}, Unchanged ${diff.unchanged.length}, Failed ${failureCount}`,
         );
       } else {
         this.loggerService.debug(

@@ -51,11 +51,26 @@ export const validationSchema = Joi.object({
   // webhook-provider/registry.ts for parsing and URL validation.
   WEBHOOK_TIMEOUT_SECONDS: Joi.number().integer().min(1).default(15),
 
+  // Accepts the standard NestJS levels plus `info` as a familiar alias
+  // for `log` (pino/bunyan/winston call the standard operational level
+  // "info"). The alias is normalized to `log` so downstream code sees
+  // the native NestJS value. `.custom()` owns both validation and
+  // transformation — `.valid()` would short-circuit before normalization.
   LOG_LEVEL: Joi.string()
     .trim()
     .empty('')
+    .lowercase()
     .default('error')
-    .valid('log', 'error', 'warn', 'debug', 'verbose', 'fatal'),
+    .custom((value: string, helpers) => {
+      const normalized = value === 'info' ? 'log' : value;
+      const accepted = ['log', 'error', 'warn', 'debug', 'verbose', 'fatal'];
+      if (!accepted.includes(normalized)) {
+        return helpers.error('any.only', {
+          valids: [...accepted, 'info'],
+        });
+      }
+      return normalized;
+    }),
 
   // Cloudflare, MikroTik, RFC2136 (and any other webhook sidecar) register
   // through the generic WEBHOOK_<NAME>_URL mechanism — see

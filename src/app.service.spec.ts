@@ -66,15 +66,18 @@ describe('AppService', () => {
   });
 
   describe('initialize', () => {
-    it('should throw if already initialized', () => {
+    it('should reject if already initialized', async () => {
       sut['state'] = State.Initialized;
-      expect(() => sut.initialize()).toThrow('Already initialized');
+      await expect(sut.initialize()).rejects.toThrow('Already initialized');
     });
 
-    it('should initialize registry and docker service', () => {
-      sut.initialize();
+    it('should initialize registry, docker service, and run negotiation', async () => {
+      await sut.initialize();
       expect(mockProviderRegistry.initialize).toHaveBeenCalledTimes(1);
       expect(mockDockerService.initialize).toHaveBeenCalledTimes(1);
+      // negotiateAll is the new async second-stage init — without it the
+      // DomainFilter on each WebhookProvider stays unset (match-all).
+      expect(mockProviderRegistry.negotiateAll).toHaveBeenCalledTimes(1);
       expect(sut['state']).toBe(State.Initialized);
     });
   });
@@ -206,6 +209,73 @@ describe('AppService', () => {
       await expect(sut.job()).rejects.toThrow('provider error');
     });
 
+    describe('per-entry apply failure isolation', () => {
+      it('logs WARN naming the entry+reason and continues with siblings when one createEntry fails', async () => {
+        const goodEntry = validDnsAEntry(DnsaEntry, {
+          name: 'good.testdomain.com',
+        });
+        goodEntry.providers = ['cf'];
+        const badEntry = validDnsAEntry(DnsaEntry, {
+          name: 'bad.testdomain.com',
+        });
+        badEntry.providers = ['cf'];
+
+        mockDockerService.extractDNSEntries.mockReturnValue([
+          goodEntry,
+          badEntry,
+        ]);
+        (mockCfProvider.createEntry as jest.Mock).mockImplementation(
+          async (e: DnsaEntry) => {
+            if (e.name === 'bad.testdomain.com') {
+              throw new Error('sidecar refused: not in zone');
+            }
+          },
+        );
+
+        const mockLogger = sut[
+          'loggerService'
+        ] as DeepMocked<ConsoleLoggerService>;
+
+        // One per-entry failure must NOT abort the cycle.
+        await expect(sut.job()).resolves.not.toThrow();
+
+        // Sibling entry still applied.
+        expect(mockCfProvider.createEntry).toHaveBeenCalledWith(goodEntry);
+        expect(mockCfProvider.createEntry).toHaveBeenCalledWith(badEntry);
+
+        // Failure surfaced with both the entry key and the sidecar reason.
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+          expect.stringMatching(/bad\.testdomain\.com/),
+        );
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+          expect.stringContaining('sidecar refused'),
+        );
+      });
+
+      it('does not abort the outer provider loop when one provider rejects every entry', async () => {
+        const mockMtProvider = makeMockProvider('mikrotik');
+        mockProviderRegistry.getAll.mockReturnValue([
+          mockCfProvider,
+          mockMtProvider,
+        ]);
+
+        const entry = validDnsAEntry(DnsaEntry, {
+          name: 'fan.testdomain.com',
+        });
+        entry.providers = ['all'];
+        mockDockerService.extractDNSEntries.mockReturnValue([entry]);
+
+        (mockMtProvider.createEntry as jest.Mock).mockRejectedValue(
+          new Error('mikrotik down'),
+        );
+
+        await expect(sut.job()).resolves.not.toThrow();
+
+        // Cloudflare provider still ran despite the MikroTik failure.
+        expect(mockCfProvider.createEntry).toHaveBeenCalledWith(entry);
+      });
+    });
+
     describe('strict provider-name routing', () => {
       it('logs an error per entry referencing an unknown provider, then skips it', async () => {
         const good = validDnsAEntry(DnsaEntry, { name: 'good.example.com' });
@@ -268,6 +338,86 @@ describe('AppService', () => {
 
         expect(mockCfProvider.createEntry).toHaveBeenCalledWith(all);
         expect(mockCfProvider.createEntry).toHaveBeenCalledWith(targeted);
+      });
+    });
+
+    describe('domain-filter pre-routing', () => {
+      it('skips an entry routed to a provider that does not serve its zone, with a named WARN', async () => {
+        const inZone = validDnsAEntry(DnsaEntry, {
+          name: 'app.example.com',
+        });
+        inZone.providers = ['cf'];
+        const outOfZone = validDnsAEntry(DnsaEntry, {
+          name: 'app.other.com',
+        });
+        outOfZone.providers = ['cf'];
+
+        // Provider serves only example.com — other.com must be skipped.
+        (
+          mockCfProvider as unknown as { matchesDomain: jest.Mock }
+        ).matchesDomain = jest.fn((name: string) =>
+          name.endsWith('example.com'),
+        );
+
+        mockDockerService.extractDNSEntries.mockReturnValue([
+          inZone,
+          outOfZone,
+        ]);
+        const logger = sut['loggerService'];
+
+        await sut.job();
+
+        expect(mockCfProvider.createEntry).toHaveBeenCalledWith(inZone);
+        expect(mockCfProvider.createEntry).not.toHaveBeenCalledWith(outOfZone);
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining('app.other.com'),
+        );
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('cf'));
+      });
+
+      it('respects providers without a matchesDomain hook (treats as match-all)', async () => {
+        const entry = validDnsAEntry(DnsaEntry, {
+          name: 'app.example.com',
+        });
+        entry.providers = ['cf'];
+        // No matchesDomain on the mock — older providers without the hook
+        // must keep working unchanged.
+        delete (mockCfProvider as unknown as { matchesDomain?: jest.Mock })
+          .matchesDomain;
+        mockDockerService.extractDNSEntries.mockReturnValue([entry]);
+
+        await sut.job();
+
+        expect(mockCfProvider.createEntry).toHaveBeenCalledWith(entry);
+      });
+
+      it('on a fan-out (`all`), drops the entry only from providers that do not serve its zone', async () => {
+        const mockMtProvider = makeMockProvider('mikrotik');
+        mockProviderRegistry.getAll.mockReturnValue([
+          mockCfProvider,
+          mockMtProvider,
+        ]);
+
+        const entry = validDnsAEntry(DnsaEntry, {
+          name: 'app.lan',
+        });
+        entry.providers = ['all'];
+
+        // cf serves only example.com → app.lan dropped for cf.
+        (
+          mockCfProvider as unknown as { matchesDomain: jest.Mock }
+        ).matchesDomain = jest.fn((n: string) => n.endsWith('example.com'));
+        // mikrotik serves .lan → app.lan accepted for mikrotik.
+        (
+          mockMtProvider as unknown as { matchesDomain: jest.Mock }
+        ).matchesDomain = jest.fn((n: string) => n.endsWith('.lan'));
+
+        mockDockerService.extractDNSEntries.mockReturnValue([entry]);
+
+        await sut.job();
+
+        expect(mockCfProvider.createEntry).not.toHaveBeenCalled();
+        expect(mockMtProvider.createEntry).toHaveBeenCalledWith(entry);
       });
     });
   });
