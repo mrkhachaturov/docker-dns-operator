@@ -212,8 +212,7 @@ export class AppService implements OnModuleDestroy {
       );
 
     const containers = await this.dockerService.getSources();
-    let allDockerEntries =
-      await this.dockerService.extractDNSEntries(containers);
+    let allDockerEntries = this.dockerService.extractDNSEntries(containers);
 
     // DDNS resolution — provider-agnostic, applied before per-provider filtering
     if (this.ddnsService.isDdnsRequired(allDockerEntries)) {
@@ -235,7 +234,7 @@ export class AppService implements OnModuleDestroy {
         });
       }
     } else if (this.ddnsService.getState() === CronState.Started)
-      await this.ddnsService.stop();
+      this.ddnsService.stop();
 
     // Strict per-entry provider validation. An entry with any unknown
     // provider name in its `providers: [...]` list (other than the special
