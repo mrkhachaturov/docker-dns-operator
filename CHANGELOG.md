@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.4] — 2026-06-04
+
 ### Fixed
 
 - **Fail-open-to-delete on an unreadable Docker source ([#12]).** A transient socket outage at startup made `DockerService.resolveSwarmMode()` swallow the `docker.info()` failure, cache `container` mode for the life of the process, and never re-probe. In a Swarm stack that meant `getSources()` returned `[]` (service `deploy.labels` aren't visible as container labels), the desired set computed to zero, and reconcile deleted **every owned record** across all providers — then stayed stuck until a manual restart. `resolveSwarmMode()` now **throws** on a failed `docker.info()` probe instead of guessing a mode, and leaves the result **unresolved** so the next event/fallback tick re-probes and self-heals once the socket recovers. A failed probe now aborts the reconcile cycle (no deletes) rather than degrading to a phantom empty source — the legitimate "deployed but not running" case stays governed by `PRESERVE_STOPPED` exactly as before.
