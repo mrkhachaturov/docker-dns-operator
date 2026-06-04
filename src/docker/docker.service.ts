@@ -113,36 +113,53 @@ export class DockerService {
    * Decision matrix:
    *   - Swarm.LocalNodeState === 'active' AND ControlAvailable === true
    *     (we're a manager and can call listServices) → swarm mode.
-   *   - Anything else (inactive / locked / worker-only / docker.info failed)
-   *     → container mode, reading whatever local containers we can see.
+   *   - inactive / locked / worker-only → container mode.
+   *   - docker.info() itself failed → THROW. We deliberately do NOT guess a
+   *     mode here. Guessing `container` on a failed probe was the
+   *     fail-open-to-delete root cause (issue #12): a transient socket outage
+   *     at boot latched the operator into container mode, getSources then read
+   *     zero service labels in a Swarm stack, and reconcile pruned every owned
+   *     record. By throwing AND leaving swarmMode unresolved we (1) make the
+   *     caller skip this cycle instead of reconciling against a phantom empty
+   *     desired set, and (2) re-probe on the next tick so a recovered socket
+   *     self-heals without an operator restart.
    *
    * Implication for operators: if you want one operator instance to see DNS
    * labels across the whole cluster, run it on a manager node. A worker-node
    * operator only sees containers running on that worker.
+   *
+   * @throws {NestedError} If docker.info() fails (probe inconclusive)
    */
   private async resolveSwarmMode(): Promise<boolean> {
     if (this.swarmMode !== undefined) return this.swarmMode;
 
+    let info: {
+      Swarm?: { LocalNodeState?: string; ControlAvailable?: boolean };
+    };
     try {
-      const info = (await this.docker.info()) as {
-        Swarm?: { LocalNodeState?: string; ControlAvailable?: boolean };
-      };
-      const state = info.Swarm?.LocalNodeState ?? 'inactive';
-      const isManager = info.Swarm?.ControlAvailable === true;
-      this.loggerService.log(
-        `DockerService, resolveSwarmMode: LocalNodeState=${state} ControlAvailable=${isManager} → ${
-          state === 'active' && isManager ? 'swarm' : 'container'
-        } mode`,
-      );
-      this.swarmMode = state === 'active' && isManager;
+      info = (await this.docker.info()) as typeof info;
     } catch (error) {
+      // Do NOT cache a result — leave swarmMode undefined so the next tick
+      // re-probes. Surface the failure so the caller aborts this cycle.
       this.loggerService.warn(
-        `DockerService, resolveSwarmMode: docker.info() failed, falling back to container mode: ${
+        `DockerService, resolveSwarmMode: docker.info() probe failed; skipping this cycle and will re-probe: ${
           (error as Error).message
         }`,
       );
-      this.swarmMode = false;
+      throw new NestedError(
+        'DockerService, resolveSwarmMode: docker.info() probe failed',
+        error,
+      );
     }
+
+    const state = info.Swarm?.LocalNodeState ?? 'inactive';
+    const isManager = info.Swarm?.ControlAvailable === true;
+    this.loggerService.log(
+      `DockerService, resolveSwarmMode: LocalNodeState=${state} ControlAvailable=${isManager} → ${
+        state === 'active' && isManager ? 'swarm' : 'container'
+      } mode`,
+    );
+    this.swarmMode = state === 'active' && isManager;
 
     return this.swarmMode;
   }

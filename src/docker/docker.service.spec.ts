@@ -280,6 +280,21 @@ describe('DockerService', () => {
         );
       });
 
+      // Regression for issue #12: when the swarm-mode probe is unresolved and
+      // docker.info() fails, getSources MUST throw — never return [] (an empty
+      // list would be read as "desired = 0" and prune every owned record).
+      it('throws (does not return []) when the swarm-mode probe fails', async () => {
+        delete sut['swarmMode'];
+        (mockDockerFactoryGetValue as any).info = jest
+          .fn()
+          .mockRejectedValue(new Error('ENOTFOUND socket_proxy'));
+
+        await expect(sut.getSources()).rejects.toThrow(
+          'DockerService, getSources: Failed getting sources',
+        );
+        expect(mockDockerFactoryGetValue.listContainers).not.toHaveBeenCalled();
+      });
+
       it('should error if not initialized', async () => {
         // arrange
         sut['state'] = States.Unintialized;
@@ -458,14 +473,35 @@ describe('DockerService', () => {
         expect(await sut['resolveSwarmMode']()).toBe(false);
       });
 
-      it('falls back to container mode and warns when docker.info() fails', async () => {
+      // Regression for issue #12: a failed probe must NOT latch the operator
+      // into a guessed mode. It throws (so the caller skips the cycle) and
+      // leaves swarmMode unresolved (so the next tick re-probes).
+      it('throws and stays unresolved when docker.info() fails (does not guess container mode)', async () => {
         (mockDockerFactoryGetValue as any).info = jest
           .fn()
           .mockRejectedValue(new Error('socket-proxy denies /info'));
-        expect(await sut['resolveSwarmMode']()).toBe(false);
-        expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
-          expect.stringContaining('falling back to container mode'),
+        await expect(sut['resolveSwarmMode']()).rejects.toThrow(
+          'docker.info() probe failed',
         );
+        expect(sut['swarmMode']).toBeUndefined();
+        expect(mockConsoleLoggerService.warn).toHaveBeenCalledWith(
+          expect.stringContaining('will re-probe'),
+        );
+      });
+
+      it('re-probes after a failed probe and self-heals once the socket recovers', async () => {
+        const infoMock = jest
+          .fn()
+          .mockRejectedValueOnce(new Error('ENOTFOUND socket_proxy'))
+          .mockResolvedValueOnce({
+            Swarm: { LocalNodeState: 'active', ControlAvailable: true },
+          });
+        (mockDockerFactoryGetValue as any).info = infoMock;
+
+        await expect(sut['resolveSwarmMode']()).rejects.toThrow();
+        // Second tick: socket is back → swarm detected, no restart needed.
+        expect(await sut['resolveSwarmMode']()).toBe(true);
+        expect(infoMock).toHaveBeenCalledTimes(2);
       });
 
       it('caches the result — second call does not re-query the daemon', async () => {
