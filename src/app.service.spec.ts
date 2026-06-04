@@ -245,7 +245,7 @@ describe('AppService', () => {
 
         // Failure surfaced with both the entry key and the sidecar reason.
         expect(mockLogger.warn).toHaveBeenCalledWith(
-          expect.stringMatching(/bad\.testdomain\.com/),
+          expect.stringContaining('bad.testdomain.com'),
         );
         expect(mockLogger.warn).toHaveBeenCalledWith(
           expect.stringContaining('sidecar refused'),
@@ -356,7 +356,7 @@ describe('AppService', () => {
         (
           mockCfProvider as unknown as { matchesDomain: jest.Mock }
         ).matchesDomain = jest.fn((name: string) =>
-          name.endsWith('example.com'),
+          name.endsWith('.example.com'),
         );
 
         mockDockerService.extractDNSEntries.mockReturnValue([
@@ -406,7 +406,7 @@ describe('AppService', () => {
         // cf serves only example.com → app.lan dropped for cf.
         (
           mockCfProvider as unknown as { matchesDomain: jest.Mock }
-        ).matchesDomain = jest.fn((n: string) => n.endsWith('example.com'));
+        ).matchesDomain = jest.fn((n: string) => n.endsWith('.example.com'));
         // mikrotik serves .lan → app.lan accepted for mikrotik.
         (
           mockMtProvider as unknown as { matchesDomain: jest.Mock }
