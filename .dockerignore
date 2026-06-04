@@ -2,3 +2,10 @@ node_modules
 reports
 Dockerfile
 out
+# tsc incremental state — copying a stale tsbuildinfo into the build
+# context fools `nest build` into a no-op emit and the image ships old
+# compiled JS (caught the first time when `negotiate()` was missing
+# from the image but present in src/). Always recompile from scratch
+# inside the build stage.
+*.tsbuildinfo
+dist
