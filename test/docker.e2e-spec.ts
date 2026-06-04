@@ -374,6 +374,37 @@ describe('DockerService (Integration)', () => {
     });
   });
 
+  describe('getSources — probe failure is fail-closed (issue #12)', () => {
+    it('throws (never returns []) when the daemon is unreachable, stays unresolved, and self-heals on recovery', async () => {
+      // arrange — a healthy service, then point the operator at a dead daemon
+      // to reproduce the startup socket outage that caused #12.
+      await initialize();
+
+      const brokenClient = new Dockerode({
+        host: '127.0.0.1',
+        port: 1,
+        timeout: 2000,
+      });
+      sut['docker'] = brokenClient as unknown as Dockerode;
+      delete sut['swarmMode'];
+
+      // act / assert — getSources MUST reject. An empty list here would be read
+      // downstream as desired=0 and prune every owned record (the bug).
+      await expect(sut.getSources()).rejects.toThrow(
+        'DockerService, getSources: Failed getting sources',
+      );
+      // Mode is left unresolved — no latch into a guessed container mode, so the
+      // next tick re-probes.
+      expect(sut['swarmMode']).toBeUndefined();
+
+      // Recovery — a healthy client on the next tick resolves a real mode and
+      // returns sources, with no operator restart.
+      sut['docker'] = new Dockerode();
+      await expect(sut.getSources()).resolves.toBeDefined();
+      expect(typeof sut['swarmMode']).toBe('boolean');
+    });
+  });
+
   it('should parse the listed containers, skipping the invalid and empty ones', async () => {
     // arrange
     process.env.PRESERVE_STOPPED = 'false';
