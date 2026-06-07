@@ -1,0 +1,8 @@
+# Local dev tool versions (mise). Mirrors package.json `engines` so any shell
+# — interactive, CI, or non-interactive — resolves node + yarn consistently.
+# Without this, `yarn` is only a mise shim with no version set and the husky
+# pre-commit hook (`yarn lint-staged`) fails. The Docker image builds on
+# `node:lts-alpine` independently, so this file is dev/tooling only.
+[tools]
+node = "24.16.0"   # satisfies engines.node ">=22.11.0"
+yarn = "1.22.22"   # Yarn 1 classic — DO NOT upgrade to Berry (see AGENTS.md)
