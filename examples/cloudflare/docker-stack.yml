@@ -14,7 +14,7 @@
 
 services:
   docker-dns-operator:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.2.0
     environment:
       LOG_LEVEL: debug
       PROJECT_LABEL: docker-dns-operator
@@ -36,7 +36,7 @@ services:
         condition: on-failure
 
   ddo-cloudflare:
-    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.1
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.2
     environment:
       WEBHOOK_LISTEN: ':9090'
       CLOUDFLARE_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN in .env}

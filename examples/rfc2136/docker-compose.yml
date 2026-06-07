@@ -17,7 +17,7 @@
 
 services:
   docker-dns-operator:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.2.0
     build: ../..
     depends_on:
       - ddo-rfc2136
@@ -34,7 +34,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   ddo-rfc2136:
-    image: ghcr.io/mrkhachaturov/ddo-rfc2136:0.1.1
+    image: ghcr.io/mrkhachaturov/ddo-rfc2136:0.2.0
     build: ../../sidecars/ddo-rfc2136
     environment:
       WEBHOOK_LISTEN: ':9090'

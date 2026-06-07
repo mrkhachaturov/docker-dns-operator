@@ -14,7 +14,7 @@
 
 services:
   ddo-cloudflare:
-    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.1
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.2
     build: ../../sidecars/ddo-cloudflare
     environment:
       WEBHOOK_LISTEN: ':9090'
@@ -23,7 +23,7 @@ services:
       # Proxy state is per-record via providerOptions.cf.proxy label.
 
   docker-dns-operator:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.2.0
     build: ../..
     depends_on:
       - ddo-cloudflare

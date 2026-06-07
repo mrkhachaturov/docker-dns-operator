@@ -91,14 +91,14 @@ Minimum Cloudflare setup using the [ddo-cloudflare](https://github.com/mrkhachat
 ```yaml
 services:
   ddo-cloudflare:
-    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.1
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.2
     environment:
       CLOUDFLARE_API_TOKEN_FILE: /run/secrets/cloudflare_token
     secrets:
       - cloudflare_token
 
   dns-operator:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.2.0
     environment:
       WEBHOOK_CF_URL: http://ddo-cloudflare:9090
     volumes:
@@ -354,14 +354,14 @@ labels:
 ```yaml
 services:
   ddo-cloudflare:
-    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.1
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.2
     environment:
       CLOUDFLARE_API_TOKEN_FILE: /run/secrets/cloudflare_token
     secrets:
       - cloudflare_token
 
   dns-operator:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.2.0
     environment:
       WEBHOOK_CF_URL: http://ddo-cloudflare:9090
     volumes:
@@ -384,14 +384,14 @@ secrets:
 ```yaml
 services:
   ddo-cloudflare:
-    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.1
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.2
     environment:
       CLOUDFLARE_API_TOKEN_FILE: /run/secrets/cloudflare_token
     secrets:
       - cloudflare_token
 
   dns-operator:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.2.0
     environment:
       WEBHOOK_CF_URL: http://ddo-cloudflare:9090
       WEBHOOK_MIKROTIK_URL: http://ddo-mikrotik:9090
@@ -399,7 +399,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   ddo-mikrotik:
-    image: ghcr.io/mrkhachaturov/ddo-mikrotik:0.1.1
+    image: ghcr.io/mrkhachaturov/ddo-mikrotik:0.2.0
     environment:
       MIKROTIK_ADDRESS: 192.168.1.1:8728
       MIKROTIK_USERNAME_FILE: /run/secrets/mikrotik_user
@@ -430,19 +430,19 @@ Run one ddo-cloudflare container per account, declare one env var per container,
 ```yaml
 services:
   ddo-cloudflare-personal:
-    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.1
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.2
     environment:
       CLOUDFLARE_API_TOKEN_FILE: /run/secrets/cf_personal
     secrets: [cf_personal]
 
   ddo-cloudflare-work:
-    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.1
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.2
     environment:
       CLOUDFLARE_API_TOKEN_FILE: /run/secrets/cf_work
     secrets: [cf_work]
 
   dns-operator:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.2.0
     environment:
       WEBHOOK_CF_PERSONAL_URL: http://ddo-cloudflare-personal:9090
       WEBHOOK_CF_WORK_URL: http://ddo-cloudflare-work:9090
@@ -483,19 +483,19 @@ Independent operator instances, each pointing at its own Cloudflare sidecar:
 ```yaml
 services:
   ddo-cloudflare-a:
-    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.1
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.2
     environment:
       CLOUDFLARE_API_TOKEN_FILE: /run/secrets/token_a
     secrets: [token_a]
 
   ddo-cloudflare-b:
-    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.1
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.2
     environment:
       CLOUDFLARE_API_TOKEN_FILE: /run/secrets/token_b
     secrets: [token_b]
 
   dns-a:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.2.0
     environment:
       INSTANCE_ID: a
       WEBHOOK_CF_URL: http://ddo-cloudflare-a:9090
@@ -503,7 +503,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   dns-b:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.2.0
     environment:
       INSTANCE_ID: b
       WEBHOOK_CF_URL: http://ddo-cloudflare-b:9090
@@ -527,14 +527,14 @@ The operator carries only the sidecar URL. All RFC 2136 configuration (DC hosts,
 ```yaml
 services:
   dns-operator:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.2.0
     environment:
       WEBHOOK_RFC2136_URL: 'http://ddo-rfc2136:9090'
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   ddo-rfc2136:
-    image: ghcr.io/mrkhachaturov/ddo-rfc2136:0.1.1
+    image: ghcr.io/mrkhachaturov/ddo-rfc2136:0.2.0
     environment:
       RFC2136_HOSTS: 'dc01.corp.example.com,dc02.corp.example.com'
       RFC2136_ZONES: 'corp.example.com'
@@ -571,7 +571,7 @@ Labels must live under `deploy.labels`, not the top-level `labels` key:
 ```yaml
 services:
   ddo-cloudflare:
-    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.1
+    image: ghcr.io/mrkhachaturov/ddo-cloudflare:0.1.2
     environment:
       CLOUDFLARE_API_TOKEN_FILE: /run/secrets/cloudflare_token
     secrets: [cloudflare_token]
@@ -580,7 +580,7 @@ services:
         constraints: [node.role == manager]
 
   dns-operator:
-    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.1.3
+    image: ghcr.io/mrkhachaturov/docker-dns-operator:0.2.0
     environment:
       WEBHOOK_CF_URL: http://ddo-cloudflare:9090
     volumes:
