@@ -26,7 +26,9 @@ export abstract class DnsbaseEntry {
   @IsEnum(DNSTypes)
   type!: DNSTypes;
 
-  @IsFQDN()
+  // allow_wildcard lets a record name lead with `*.` (e.g. *.dev.example.com).
+  // Only the record *name* may be a wildcard — CNAME/MX/NS values stay strict FQDNs.
+  @IsFQDN({ allow_wildcard: true })
   name!: string;
 
   /**

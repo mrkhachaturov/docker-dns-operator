@@ -69,6 +69,17 @@ describe('DnsbaseEntry', () => {
         },
       );
 
+      each(['*.test.work', '*.dev.test.work']).it(
+        'should accept a wildcard record name (%p)',
+        async (domainName) => {
+          // arrange
+          sut.name = domainName;
+
+          // act / assert
+          expect(validate(sut)).resolves.toHaveLength(0);
+        },
+      );
+
       each(['a', 'em', '', '   ', '123', 'test@thing.com']).it(
         'should not be an invalid string (%p)',
         async (invalid) => {

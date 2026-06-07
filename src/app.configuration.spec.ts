@@ -119,6 +119,26 @@ describe('App Configuration', () => {
     }
   });
 
+  it('should default LOG_LEVEL to "log" (external-dns info parity) when unset', async () => {
+    const spyLoadConfigurationComposedConstants = jest
+      .spyOn(ConfigurationModule, 'loadConfigurationComposedConstants')
+      .mockReturnValue({ ENTRY_IDENTIFIER: '' });
+
+    try {
+      process.env.PROJECT_LABEL = 'label';
+      process.env.INSTANCE_ID = '1';
+      process.env.EXECUTION_FREQUENCY_SECONDS = '60';
+      process.env.PRESERVE_STOPPED = 'false';
+      delete process.env.LOG_LEVEL;
+
+      const sut = await getSystemUnderTest();
+
+      expect(sut.get('LOG_LEVEL', { infer: true })).toEqual('log');
+    } finally {
+      spyLoadConfigurationComposedConstants.mockRestore();
+    }
+  });
+
   it('should reject LOG_LEVEL=trace as invalid', async () => {
     process.env.PROJECT_LABEL = 'label';
     process.env.INSTANCE_ID = '1';

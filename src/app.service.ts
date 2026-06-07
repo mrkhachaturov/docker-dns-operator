@@ -325,6 +325,16 @@ export class AppService implements OnModuleDestroy {
         })),
       ];
 
+      // Narrate each intended change before applying, external-dns style
+      // ("Desired change: CREATE A:app.example.com"). At the default `log`
+      // level this is what the user sees when a labelled container is
+      // deployed; quieter levels hide it, debug/verbose keep it.
+      ops.forEach((op) => {
+        this.loggerService.log(
+          `[${provider.providerKey}] Desired change: ${op.kind.toUpperCase()} ${op.key}`,
+        );
+      });
+
       // eslint-disable-next-line no-await-in-loop
       const results = await Promise.allSettled(ops.map((o) => o.promise));
       let failureCount = 0;

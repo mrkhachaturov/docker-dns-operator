@@ -19,6 +19,14 @@ DNS implementations in the operator.
   Dependabot updates them. **Don't relax to floating tags.**
 - `examples/rfc2136/krb5.conf` is gitignored; only `krb5.conf.example` is
   committed. Same pattern for `.env` vs `.env.example`.
+- **Local image builds: tag distinctly + `--no-cache`.** When building an
+  image to test by hand, NEVER reuse the public tag (`ghcr.io/.../...:0.1.x`).
+  A cached `COPY . .` layer under the same tag silently ships stale compiled
+  JS (the tsc no-op-emit trap `.dockerignore` warns about), so your fix
+  appears to "not work". Build under a throwaway tag and skip the cache —
+  e.g. `docker build --no-cache -t ddo-operator:smoke .` — and point the
+  stack/compose override at that tag. CI is unaffected (clean checkout, no
+  cache), so released images are always fresh; this gotcha is local only.
 
 ## Non-obvious behavior
 

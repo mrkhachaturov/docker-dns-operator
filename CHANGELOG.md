@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-06-07
+
+### Added
+
+- **Wildcard record names.** A label entry may now use a leading `*.` wildcard `name` (e.g. `*.dev.example.com`) for any record type. The DTO validator switched from a bare `@IsFQDN()` to `@IsFQDN({ allow_wildcard: true })`, mirroring external-dns, which treats `*.` as an ordinary owner name. Whether a wildcard actually lands depends on the target provider/zone: MikroTik stores it as a `regexp` row, Cloudflare supports `*.` natively, and **Windows AD DNS refuses wildcards via RFC 2136 dynamic update** (create manually, delegate the subzone, or route the wildcard to MikroTik). See [LABELS.md](LABELS.md).
+- **external-dns-style per-record reconcile logging.** Each applied change now logs a `[<provider>] Desired change: <CREATE|UPDATE|DELETE> <type>:<name>` line, alongside the existing per-provider `Synchronisation complete: …` summary — so a deploy that changes records is visible in `docker logs` out of the box.
+
+### Changed
+
+- **`LOG_LEVEL` now defaults to `log`** (was `error`), matching external-dns's `info` default. Startup, per-record changes, and the sync summary are visible by default; label-validation drops surface at `warn`. Drop to `warn`/`error` for quieter production, or raise to `debug` to also see no-op ticks. `info` remains accepted as an alias for `log`.
+- Bumped sidecar submodule pointers to **ddo-mikrotik v0.2.0** and **ddo-rfc2136 v0.2.0** (both add wildcard support; ddo-rfc2136 also self-tunes its Kerberos TGT refresh — see their changelogs).
+
 ## [0.1.4] — 2026-06-04
 
 ### Fixed

@@ -56,11 +56,16 @@ export const validationSchema = Joi.object({
   // "info"). The alias is normalized to `log` so downstream code sees
   // the native NestJS value. `.custom()` owns both validation and
   // transformation — `.valid()` would short-circuit before normalization.
+  //
+  // Default is `log` to match external-dns, whose default level is `info`:
+  // out of the box the operator narrates startup, per-record changes, and
+  // the per-provider sync summary. Drop to `warn`/`error` for quieter prod,
+  // or raise to `debug`/`verbose` to also see no-op ticks and method traces.
   LOG_LEVEL: Joi.string()
     .trim()
     .empty('')
     .lowercase()
-    .default('error')
+    .default('log')
     .custom((value: string, helpers) => {
       const normalized = value === 'info' ? 'log' : value;
       const accepted = ['log', 'error', 'warn', 'debug', 'verbose', 'fatal'];

@@ -112,6 +112,20 @@ describe('AppService', () => {
       expect(mockCfProvider.createEntry).toHaveBeenCalledWith(entry);
     });
 
+    it('logs an external-dns-style "Desired change" line per applied change', async () => {
+      const entry = validDnsAEntry(DnsaEntry, { name: 'new.testdomain.com' });
+      entry.providers = ['cf'];
+      mockDockerService.extractDNSEntries.mockReturnValue([entry]);
+      mockCfProvider.getRecords.mockResolvedValue([]);
+      const logger = sut['loggerService'] as DeepMocked<ConsoleLoggerService>;
+
+      await sut.job();
+
+      expect(logger.log).toHaveBeenCalledWith(
+        expect.stringContaining(`Desired change: CREATE ${entry.Key}`),
+      );
+    });
+
     it('should call deleteEntry for removed entries', async () => {
       const existingRecord = makeProviderRecord('old.testdomain.com');
       mockCfProvider.getRecords.mockResolvedValue([existingRecord]);
