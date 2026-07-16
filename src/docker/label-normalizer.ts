@@ -44,6 +44,42 @@ export function normalizeProviders(
 }
 
 /**
+ * Normalizes the raw label `tags` field into a canonical string[].
+ *
+ * Three-valued return, mirroring the entry-skip contract used elsewhere:
+ *   - `undefined` — the field is absent. Distinct from `[]`: tags carry NO
+ *     backward-compat default (that belongs to `providers`), so "absent"
+ *     must stay distinguishable so the resolver knows not to invent one.
+ *   - `null` — the field is present but malformed (empty string, empty array,
+ *     blank or non-string element). Caller warns and skips the entry.
+ *   - `string[]` — trimmed, lower-cased tags.
+ *
+ * A bare string is accepted as a one-element list, same as `providers`. Tags
+ * are matched against provider tags declared via `WEBHOOK_<NAME>_TAGS`; an
+ * unknown tag is rejected loudly at reconcile time, never silently dropped.
+ */
+export function normalizeTags(rawTags: unknown): string[] | null | undefined {
+  if (rawTags === undefined || rawTags === null) return undefined;
+
+  if (typeof rawTags === 'string') {
+    const trimmed = rawTags.trim().toLowerCase();
+    if (!trimmed) return null;
+    return [trimmed];
+  }
+
+  if (Array.isArray(rawTags)) {
+    if (rawTags.length === 0) return null;
+    const lowercased = rawTags.map((item) =>
+      typeof item === 'string' ? item.trim().toLowerCase() : null,
+    );
+    if (lowercased.some((item) => !item)) return null;
+    return lowercased as string[];
+  }
+
+  return null;
+}
+
+/**
  * Parses a raw label value as a boolean.
  * Accepts: true/false (boolean), "true"/"false" (string).
  * Returns null for any other value — caller must warn and skip the entry.

@@ -42,6 +42,12 @@ export class WebhookProvider implements IDnsProvider {
     private readonly client: WebhookClient,
     private readonly ownershipLabel: string,
     private readonly logger: ConsoleLoggerService,
+    /**
+     * Routing tags from WEBHOOK_<NAME>_TAGS. A `tags: [...]` label targets
+     * every instance carrying one of these. Empty when unset; the registry
+     * has already normalized and rejected the reserved "all" token.
+     */
+    public readonly tags: string[] = [],
   ) {}
 
   // eslint-disable-next-line class-methods-use-this

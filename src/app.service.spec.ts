@@ -355,6 +355,76 @@ describe('AppService', () => {
       });
     });
 
+    describe('tag routing', () => {
+      // Two Technitium instances sharing a "technitium" tag, plus cf.
+      const makeTagged = (key: string, tags: string[]) => {
+        const p = makeMockProvider(key);
+        (p as unknown as { tags: string[] }).tags = tags;
+        return p;
+      };
+
+      it('routes a tags-only entry to every provider carrying the tag, not to cf', async () => {
+        const techA = makeTagged('tech-a', ['technitium']);
+        const techB = makeTagged('tech-b', ['technitium']);
+        mockProviderRegistry.getAll.mockReturnValue([
+          mockCfProvider,
+          techA,
+          techB,
+        ]);
+
+        const entry = validDnsAEntry(DnsaEntry, { name: 'app.example.com' });
+        // A tags-only entry, as DockerService produces it: the providers
+        // field is left undefined so the cf backward-compat default is not
+        // injected and tags alone do the routing.
+        entry.providers = undefined;
+        entry.tags = ['technitium'];
+        mockDockerService.extractDNSEntries.mockReturnValue([entry]);
+
+        await sut.job();
+
+        expect(techA.createEntry).toHaveBeenCalledWith(entry);
+        expect(techB.createEntry).toHaveBeenCalledWith(entry);
+        // the backward-compat cf default must NOT leak in when tags are present
+        expect(mockCfProvider.createEntry).not.toHaveBeenCalled();
+      });
+
+      it('unions an explicit provider key with a tag', async () => {
+        const techA = makeTagged('tech-a', ['internal']);
+        mockProviderRegistry.getAll.mockReturnValue([mockCfProvider, techA]);
+
+        const entry = validDnsAEntry(DnsaEntry, { name: 'vpn.example.com' });
+        entry.providers = ['cf'];
+        entry.tags = ['internal'];
+        mockDockerService.extractDNSEntries.mockReturnValue([entry]);
+
+        await sut.job();
+
+        expect(mockCfProvider.createEntry).toHaveBeenCalledWith(entry);
+        expect(techA.createEntry).toHaveBeenCalledWith(entry);
+      });
+
+      it('rejects an entry whose tag matches no provider, loudly', async () => {
+        const techA = makeTagged('tech-a', ['technitium']);
+        mockProviderRegistry.getAll.mockReturnValue([mockCfProvider, techA]);
+        const loggerMock = sut['loggerService'];
+
+        const entry = validDnsAEntry(DnsaEntry, { name: 'x.example.com' });
+        entry.tags = ['publik']; // typo, matches nothing
+        mockDockerService.extractDNSEntries.mockReturnValue([entry]);
+
+        await sut.job();
+
+        expect(techA.createEntry).not.toHaveBeenCalled();
+        expect(mockCfProvider.createEntry).not.toHaveBeenCalled();
+        expect(loggerMock.error).toHaveBeenCalledWith(
+          expect.stringContaining('publik'),
+        );
+        expect(loggerMock.error).toHaveBeenCalledWith(
+          expect.stringContaining('tag(s)'),
+        );
+      });
+    });
+
     describe('domain-filter pre-routing', () => {
       it('skips an entry routed to a provider that does not serve its zone, with a named WARN', async () => {
         const inZone = validDnsAEntry(DnsaEntry, {

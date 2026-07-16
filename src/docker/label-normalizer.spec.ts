@@ -1,6 +1,7 @@
 import {
   normalizeProviders,
   normalizeProviderOptions,
+  normalizeTags,
 } from './label-normalizer';
 
 describe('normalizeProviders', () => {
@@ -41,6 +42,43 @@ describe('normalizeProviders', () => {
 
   it('providers array takes precedence over singular provider', () => {
     expect(normalizeProviders('cf', ['mikrotik'])).toEqual(['mikrotik']);
+  });
+});
+
+describe('normalizeTags', () => {
+  it('returns undefined when absent (no backward-compat default, unlike providers)', () => {
+    expect(normalizeTags(undefined)).toBeUndefined();
+    expect(normalizeTags(null)).toBeUndefined();
+  });
+
+  it('normalizes a bare string to a one-element array', () => {
+    expect(normalizeTags('Public')).toEqual(['public']);
+  });
+
+  it('normalizes an array, trimming and lowercasing', () => {
+    expect(normalizeTags([' Technitium ', 'INTERNAL'])).toEqual([
+      'technitium',
+      'internal',
+    ]);
+  });
+
+  it('returns null for empty string (malformed)', () => {
+    expect(normalizeTags('')).toBeNull();
+    expect(normalizeTags('   ')).toBeNull();
+  });
+
+  it('returns null for empty array (malformed)', () => {
+    expect(normalizeTags([])).toBeNull();
+  });
+
+  it('returns null for array with blank or non-string elements (malformed)', () => {
+    expect(normalizeTags(['ok', ''])).toBeNull();
+    expect(normalizeTags(['ok', 123])).toBeNull();
+  });
+
+  it('returns null for non-string/array input (malformed)', () => {
+    expect(normalizeTags(123)).toBeNull();
+    expect(normalizeTags({})).toBeNull();
   });
 });
 

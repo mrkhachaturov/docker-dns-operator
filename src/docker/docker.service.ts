@@ -19,6 +19,7 @@ import { getLogClassDecorator } from '../utility.functions';
 import {
   normalizeProviders,
   normalizeProviderOptions,
+  normalizeTags,
 } from './label-normalizer';
 import { DockerSource } from './docker-source';
 
@@ -460,16 +461,37 @@ export class DockerService {
 
           const rawEntry = entry as Record<string, unknown>;
 
-          // Normalize providers
-          const providers = normalizeProviders(
-            rawEntry.provider,
-            rawEntry.providers,
-          );
-          if (providers === null) {
+          // Normalize tags first: their presence changes how providers default.
+          const tags = normalizeTags(rawEntry.tags);
+          if (tags === null) {
             this.loggerService.warn(
-              `DockerService, extractDNSEntries: source ${source.Id} has malformed providers field, entry skipped`,
+              `DockerService, extractDNSEntries: source ${source.Id} has malformed tags field, entry skipped`,
             );
             return;
+          }
+
+          // Normalize providers. The ['cf'] backward-compat default only makes
+          // sense when the entry names no route at all — if it carries tags,
+          // those do the routing and injecting 'cf' would leak the record to
+          // CloudFlare. So suppress the default when providers are absent but
+          // tags are present; otherwise normalize as usual.
+          const providersAbsent =
+            (rawEntry.providers === undefined || rawEntry.providers === null) &&
+            (rawEntry.provider === undefined || rawEntry.provider === null);
+          let providers: string[] | null | undefined;
+          if (providersAbsent && tags !== undefined) {
+            providers = undefined;
+          } else {
+            providers = normalizeProviders(
+              rawEntry.provider,
+              rawEntry.providers,
+            );
+            if (providers === null) {
+              this.loggerService.warn(
+                `DockerService, extractDNSEntries: source ${source.Id} has malformed providers field, entry skipped`,
+              );
+              return;
+            }
           }
 
           // Normalize providerOptions (null = malformed, skip entry)
@@ -486,6 +508,7 @@ export class DockerService {
             proxy,
             provider,
             providers: rawProvidersField,
+            tags: rawTagsField,
             providerOptions: rawProviderOptionsField,
             ...restEntry
           } = rawEntry;
@@ -497,6 +520,7 @@ export class DockerService {
               instance = plainToInstance(DnsaEntry, {
                 ...restEntry,
                 providers,
+                ...(tags ? { tags } : {}),
                 ...(providerOptions ? { providerOptions } : {}),
               });
               break;
@@ -504,6 +528,7 @@ export class DockerService {
               instance = plainToInstance(DnsAaaaEntry, {
                 ...restEntry,
                 providers,
+                ...(tags ? { tags } : {}),
                 ...(providerOptions ? { providerOptions } : {}),
               });
               break;
@@ -511,6 +536,7 @@ export class DockerService {
               instance = plainToInstance(DnsCnameEntry, {
                 ...restEntry,
                 providers,
+                ...(tags ? { tags } : {}),
                 ...(providerOptions ? { providerOptions } : {}),
               });
               break;
@@ -518,6 +544,7 @@ export class DockerService {
               instance = plainToInstance(DnsMxEntry, {
                 ...restEntry,
                 providers,
+                ...(tags ? { tags } : {}),
                 ...(providerOptions ? { providerOptions } : {}),
               });
               break;
@@ -525,6 +552,7 @@ export class DockerService {
               instance = plainToInstance(DnsNsEntry, {
                 ...restEntry,
                 providers,
+                ...(tags ? { tags } : {}),
                 ...(providerOptions ? { providerOptions } : {}),
               });
               break;

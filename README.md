@@ -233,6 +233,28 @@ This is the mechanism for declaring **multiple instances of the same backend** �
 
 A typo in `providers: [...]` (e.g. `mikrotic-home`) causes that entry to fail reconciliation loudly — the operator never guesses what the user meant.
 
+**Routing by tag.** To target a whole group of instances at once — every CloudFlare account, every Technitium box — declare a tag on each with the sibling `WEBHOOK_<NAME>_TAGS` (comma-separated) and reference it from the entry's `tags` field instead of listing each key:
+
+```bash
+WEBHOOK_TECH_HOME_URL=http://ddo-tech-home:9090
+WEBHOOK_TECH_HOME_TAGS=technitium,internal
+WEBHOOK_TECH_OFFICE_URL=http://ddo-tech-office:9090
+WEBHOOK_TECH_OFFICE_TAGS=technitium,internal
+```
+
+```jsonc
+[
+  {
+    "type": "A",
+    "name": "app.example.com",
+    "address": "10.0.0.5",
+    "tags": ["technitium"],
+  },
+]
+```
+
+Each tag expands to every provider carrying it, unioned with any explicit `providers`. A new instance tagged `technitium` joins the group with no label change. Same strict rule as keys: a tag matching no provider fails the entry loudly, and `all` is reserved (a provider cannot be tagged `all`). Full grammar in [LABELS.md](LABELS.md#tags--routing-by-provider-group).
+
 > [!NOTE]
 > Every provider — Cloudflare ([ddo-cloudflare](https://github.com/mrkhachaturov/ddo-cloudflare)), MikroTik ([ddo-mikrotik](https://github.com/mrkhachaturov/ddo-mikrotik)), and RFC 2136 ([ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136)) — is now a sidecar registered via `WEBHOOK_<NAME>_URL`. The operator no longer carries any in-process DNS implementation.
 
@@ -243,6 +265,7 @@ A typo in `providers: [...]` (e.g. `mikrotic-home`) causes that entry to fail re
 - The bare name `WEBHOOK_URL` is rejected — `<NAME>` is required.
 - Value must be a non-empty, parseable URL.
 - If two env vars normalize to the same provider key (e.g. `WEBHOOK_CF_HOME_URL` + `WEBHOOK_CF-HOME_URL`), the operator refuses to start.
+- An optional sibling `WEBHOOK_<NAME>_TAGS` (comma-separated) declares routing tags for that instance. Tags are trimmed and lower-cased; the reserved token `all` is refused at startup.
 
 See [Configuration » `WEBHOOK_TIMEOUT_SECONDS`](#️-environment-variables) for the per-call HTTP timeout that applies to every webhook instance.
 
