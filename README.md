@@ -1,6 +1,6 @@
 # 🧭 docker-dns-operator
 
-> 🐳 Declarative DNS for Docker. The Docker analog of [kubernetes-sigs/external-dns](https://github.com/kubernetes-sigs/external-dns): label your containers (standalone Docker) or services (Swarm) with the desired DNS records and the operator reconciles them into Cloudflare, MikroTik RouterOS, and/or Active Directory DNS — reactively, as containers come and go.
+> 🐳 Declarative DNS for Docker. The Docker analog of [kubernetes-sigs/external-dns](https://github.com/kubernetes-sigs/external-dns): label your containers (standalone Docker) or services (Swarm) with the desired DNS records and the operator reconciles them into Cloudflare, MikroTik RouterOS, and/or any RFC 2136 server (Active Directory, BIND, Knot, PowerDNS, Technitium) — reactively, as containers come and go.
 
 [![GHCR](https://img.shields.io/github/v/release/mrkhachaturov/docker-dns-operator?label=ghcr.io&sort=semver)](https://github.com/mrkhachaturov/docker-dns-operator/pkgs/container/docker-dns-operator)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -10,7 +10,7 @@
 | 🐳  | Runs on         | Standalone Docker and Docker Swarm — auto-detected at startup                                                                                                                |
 | 🏷️  | Source of truth | Container labels, or Swarm `deploy.labels`                                                                                                                                   |
 | 🔄  | Reconciler      | Event-driven: subscribes to Docker container/service events and reconciles on change. Slow fallback every `EXECUTION_FREQUENCY_SECONDS` as a safety net + DDNS-IP propagator |
-| 🌐  | Providers       | Cloudflare, MikroTik RouterOS, RFC 2136 / Active Directory                                                                                                                   |
+| 🌐  | Providers       | Cloudflare, MikroTik RouterOS, RFC 2136 (Active Directory, BIND, Knot, PowerDNS, Technitium)                                                                                 |
 | 🛡️  | Ownership       | Per-sidecar marker carrying `${PROJECT_LABEL}:${INSTANCE_ID}`. Pre-existing records are never touched                                                                        |
 | 🧩  | Records         | A, AAAA, CNAME, MX, NS (all providers)                                                                                                                                       |
 
@@ -49,7 +49,7 @@ graph LR
 
     CFW -->|HTTPS| CF["☁️ Cloudflare API"]
     MTW -->|RouterOS<br/>native API| MT["📡 MikroTik router"]
-    RFW -->|GSS-TSIG| AD["🏢 Active Directory DNS"]
+    RFW -->|"DNS UPDATE<br/>GSS-TSIG or HMAC-TSIG"| AD["🏢 AD / BIND / Knot<br/>PowerDNS / Technitium"]
 
     style DK fill:#2496ed,color:#fff,stroke:#2496ed
     style OP fill:#0f766e,color:#fff,stroke:#0f766e
@@ -78,7 +78,7 @@ Standalone Docker vs Swarm mode is **auto-detected at startup** via `docker info
 > Every managed record is stamped with the operator's identity `${PROJECT_LABEL}:${INSTANCE_ID}` so the reconciler only ever touches its own records. The mechanism differs per sidecar to match the backend's native facilities:
 >
 > - **Cloudflare** and **MikroTik** — written into the record's `comment` field.
-> - **RFC 2136 / AD** — paired TXT record at `ddo-<type>.<name>` with value `owned-by=${PROJECT_LABEL}:${INSTANCE_ID}` (the external-dns convention for raw DNS).
+> - **RFC 2136** — paired TXT record at `ddo-<type>.<name>` with value `owned-by=${PROJECT_LABEL}:${INSTANCE_ID}` (the external-dns convention for raw DNS). The protocol has no metadata slot, so the marker is a real record rather than a comment field.
 >
 > In all three cases the operator sees only rows carrying its own marker; everything else stays untouched. Two instances with different `INSTANCE_ID`s coexist safely in the same zone.
 
@@ -121,7 +121,7 @@ The operator subscribes to Docker container events (`create/start/stop/die/destr
 > [!NOTE]
 > Two things to fix before this actually deploys: replace `whoami.example.com` with a name in a zone your Cloudflare token can edit, and put a real public IP in `address`. The entry omits `providers`, which defaults to `["cf"]` — fine here, but route explicitly (`"providers": ["cf"]` or any other key you've registered) for anything beyond a single-provider demo.
 
-For MikroTik or Active Directory, see [Providers](#-providers).
+For MikroTik, or for any RFC 2136 server (Active Directory, BIND, Knot, PowerDNS, Technitium), see [Providers](#-providers).
 
 ---
 
@@ -147,29 +147,49 @@ Supports A, AAAA, CNAME, MX, NS.
 
 The sidecar lives in its own repo at [mrkhachaturov/ddo-mikrotik](https://github.com/mrkhachaturov/ddo-mikrotik) and is attached here as a git submodule under [sidecars/ddo-mikrotik/](sidecars/ddo-mikrotik/). Ownership is round-tripped through the row's `comment` field: the operator stamps `labels.owner` on every Endpoint, the sidecar persists it verbatim and reads it back on the next list — so two operators with different `INSTANCE_ID`s can safely share the same router.
 
-### 🏢 RFC 2136 / Active Directory (via webhook sidecar)
+### 🏢 RFC 2136 — Active Directory, BIND, Knot, PowerDNS, Technitium (via webhook sidecar)
 
-Enabled when `WEBHOOK_RFC2136_URL` is set on the operator and the [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) webhook sidecar is reachable at that URL. Uses the same RFC 2136 provider model as [external-dns](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/rfc2136.md), with GSS-TSIG for Active Directory. All RFC 2136 configuration (DC hosts, zones, Kerberos realm/principal, keytab, TTLs, AXFR toggle, dry-run) lives on the sidecar — see its [README](https://github.com/mrkhachaturov/ddo-rfc2136#configuration) for the full env list.
+Enabled when `WEBHOOK_RFC2136_URL` is set on the operator and the [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) webhook sidecar is reachable at that URL. Uses the same RFC 2136 provider model as [external-dns](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/rfc2136.md).
+
+Every authoritative server speaks the same UPDATE wire protocol; only the signature on the message differs, and the sidecar's `RFC2136_AUTH_MODE` picks it:
+
+| Mode                 | Signature                     | Who speaks it                              |
+| -------------------- | ----------------------------- | ------------------------------------------ |
+| `gss-tsig` (default) | RFC 3645 GSS-TSIG (Kerberos)  | Active Directory — it accepts nothing else |
+| `hmac-tsig`          | RFC 8945 TSIG, pre-shared key | BIND, Knot, PowerDNS, Technitium           |
+| `insecure`           | none                          | anything, authorised by network ACL alone  |
+
+So one sidecar image covers every self-hosted authoritative server. Run two instances with different modes and register both to serve AD and a homelab resolver side by side:
+
+```yaml
+environment:
+  WEBHOOK_RFC2136_URL: http://ddo-rfc2136:9090 # gss-tsig → AD    → provider key "rfc2136"
+  WEBHOOK_TECHNITIUM_URL: http://ddo-technitium:9090 # hmac-tsig → Technitium → key "technitium"
+```
+
+All RFC 2136 configuration (hosts, zones, auth mode and its credentials, TTLs, AXFR toggle, dry-run) lives on the sidecar — see its [README](https://github.com/mrkhachaturov/ddo-rfc2136#how-to-configure) for the full env list.
 
 Supports A, AAAA, CNAME, MX, NS.
 
 ```mermaid
 graph LR
     OP["🧭 operator"] -->|HTTP| TR["🔌 ddo-rfc2136<br/>Go sidecar"]
-    KT["🔑 keytab"] -->|kinit -kt| TR
-    TR -->|GSS-TSIG signed| DC1["🏢 DC #1"]
-    TR -->|GSS-TSIG signed| DC2["🏢 DC #2"]
+    KT["🔑 keytab"] -.->|kinit -kt<br/>gss-tsig only| TR
+    TK["🔑 TSIG key"] -.->|hmac-tsig only| TR
+    TR -->|GSS-TSIG signed| DC1["🏢 AD DC"]
+    TR -->|HMAC-TSIG signed| NS1["🌐 BIND / Technitium"]
     TR -->|/healthz| HC{"🩺 alive?"}
 
     style OP fill:#0f766e,color:#fff,stroke:#0f766e
     style TR fill:#8b5cf6,color:#fff,stroke:#8b5cf6
     style KT fill:#f59e0b,color:#000,stroke:#f59e0b
+    style TK fill:#f59e0b,color:#000,stroke:#f59e0b
     style DC1 fill:#0078d4,color:#fff,stroke:#0078d4
-    style DC2 fill:#0078d4,color:#fff,stroke:#0078d4
+    style NS1 fill:#0078d4,color:#fff,stroke:#0078d4
     style HC fill:#10b981,color:#fff,stroke:#10b981
 ```
 
-The Kerberos/TSIG protocol layer runs in a separate Go webhook sidecar that lives in its own repo at [mrkhachaturov/ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) and is attached here as a git submodule under [sidecars/ddo-rfc2136/](sidecars/ddo-rfc2136/). The sidecar acquires Kerberos credentials on startup (either `kinit -kt` against a keytab or password mode), refreshes the TGT in the background, signs UPDATE and AXFR with GSS-TSIG, and exposes `/healthz`.
+The protocol layer runs in a separate Go webhook sidecar that lives in its own repo at [mrkhachaturov/ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) and is attached here as a git submodule under [sidecars/ddo-rfc2136/](sidecars/ddo-rfc2136/). Under `gss-tsig` it acquires Kerberos credentials on startup (`kinit -kt` against a keytab, or password mode) and refreshes the TGT in the background; under `hmac-tsig` there is no credential to acquire or keep alive, so it signs with the pre-shared key and skips all of that. Either way it signs UPDATE and AXFR, and exposes `/healthz`.
 
 The **sidecar** implements failover across multiple DCs (`RFC2136_HOSTS` env on the sidecar) with a per-DC circuit breaker, per-zone DC pinning, and an AXFR-disabled mode for environments where zone transfers are denied — see the sidecar README for the full list. Ownership is round-tripped through the standard external-dns paired TXT marker (`ddo-<type>.<name>`), surfaced verbatim on `GET /records` and respected on `POST /records`.
 
@@ -295,7 +315,9 @@ The operator's only MikroTik-related variable is the URL of the sidecar. All Rou
 <details>
 <summary><strong>🏢 RFC 2136 — operator-side env</strong></summary>
 
-The operator's only RFC 2136-related variable is the URL of the sidecar. All RFC 2136 configuration (DC hosts, zones, Kerberos realm/principal, keytab, TTLs, AXFR toggle, dry-run, circuit-breaker thresholds, domain filter) lives on the [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) sidecar's environment — see its [README](https://github.com/mrkhachaturov/ddo-rfc2136#configuration) for the full list.
+The operator's only RFC 2136-related variable is the URL of the sidecar. All RFC 2136 configuration (hosts, zones, auth mode and its credentials, TTLs, AXFR toggle, dry-run, circuit-breaker thresholds, domain filter) lives on the [ddo-rfc2136](https://github.com/mrkhachaturov/ddo-rfc2136) sidecar's environment — see its [README](https://github.com/mrkhachaturov/ddo-rfc2136#how-to-configure) for the full list.
+
+The name is just a registry key, not a coupling. The sidecar is one image with three auth modes, so a second instance pointed at Technitium or BIND registers under whatever name you give it — `WEBHOOK_TECHNITIUM_URL` → provider key `technitium`, referenced from a record's `providers: [...]` like any other. No operator change is needed for a new backend.
 
 | Variable              | Default | Description                                                                                                                                                                   |
 | --------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -520,9 +542,9 @@ services:
 </details>
 
 <details>
-<summary>🏢 <strong>Active Directory (RFC 2136)</strong></summary>
+<summary>🏢 <strong>RFC 2136 (Active Directory, BIND, Knot, PowerDNS, Technitium)</strong></summary>
 
-The operator carries only the sidecar URL. All RFC 2136 configuration (DC hosts, zones, Kerberos realm/principal, keytab) lives on the sidecar:
+The operator carries only the sidecar URL. All RFC 2136 configuration (hosts, zones, and whichever credentials `RFC2136_AUTH_MODE` calls for — Kerberos realm/principal/keytab under `gss-tsig`, a TSIG key under `hmac-tsig`) lives on the sidecar:
 
 ```yaml
 services:

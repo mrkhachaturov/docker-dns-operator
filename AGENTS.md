@@ -7,11 +7,24 @@ external-dns **webhook v1** sidecars (`ddo-cloudflare`, `ddo-mikrotik`,
 `ddo-rfc2136`) discovered by `WEBHOOK_<NAME>_URL` env vars. Zero in-process
 DNS implementations in the operator.
 
+`ddo-rfc2136` covers every self-hosted authoritative server, not just AD:
+`RFC2136_AUTH_MODE` picks `gss-tsig` (Kerberos, what AD demands — the
+default), `hmac-tsig` (pre-shared key — BIND, Knot, PowerDNS, Technitium) or
+`insecure`. Same wire protocol, different signature. Run two instances with
+different modes and register both (`WEBHOOK_RFC2136_URL`,
+`WEBHOOK_TECHNITIUM_URL`) to serve AD and a homelab resolver side by side.
+
 ## Gotchas
 
 - **Yarn 1.22.x classic — DO NOT upgrade to Berry.**
-- `sidecars/` are git submodules pointing at separate repos. `ddo-rfc2136`
-  needs `CGO_ENABLED=1` + `libkrb5-dev` (GSS-TSIG); the other two are pure Go.
+- `sidecars/` are git submodules pointing at separate repos. All three are
+  pure Go, `CGO_ENABLED=0`. `ddo-rfc2136`'s image is alpine rather than
+  distroless because `gss-tsig` mode shells out to the `kinit` **binary** —
+  not because anything links libkrb5. (`bodgit/tsig/gss` defaults to pure-Go
+  gokrb5; the C implementation only compiles under `-tags apcera`.)
+- **Submodules sit in detached HEAD at the pinned commit.** Any local branch
+  in them is leftover state and may be far behind. Branch from `origin/main`
+  after a fetch, never from a local `main` — the tree rewinds silently.
 - `yarn test:e2e` uses testcontainers — needs a running Docker daemon.
 - Joi schema in [src/app.configuration.ts](src/app.configuration.ts) is the
   source of truth for env vars. Update it + the README table together.
