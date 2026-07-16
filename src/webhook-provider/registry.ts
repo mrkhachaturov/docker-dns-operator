@@ -21,17 +21,45 @@ import { WebhookProvider } from './webhook-provider';
  */
 const WEBHOOK_ENV_REGEX = /^WEBHOOK_([A-Z0-9][A-Z0-9_]*)_URL$/;
 
+/**
+ * Reserved routing token. `providers: ["all"]` fans out to every provider, so
+ * a provider must never be *tagged* "all" — that would let a `tags: ["all"]`
+ * label look meaningful when it is not. Rejected at boot.
+ */
+const RESERVED_TAG = 'all';
+
 export interface WebhookInstanceConfig {
   /** providerKey used in the registry and in entry `providers: [...]` lists. */
   name: string;
   /** original env var key, for diagnostics. */
   envKey: string;
   url: string;
+  /**
+   * Tags declared for this instance via the sibling WEBHOOK_<NAME>_TAGS env
+   * (comma-separated, trimmed, lower-cased). A `tags: [...]` label targets
+   * every instance carrying one of the named tags. Empty when unset.
+   */
+  tags: string[];
+}
+
+/**
+ * Parse the sibling WEBHOOK_<NAME>_TAGS value into a canonical tag list:
+ * comma-separated, each trimmed and lower-cased, blank tokens (comma
+ * artifacts) dropped. Mirrors external-dns's prepareFilters — normalize once
+ * here so routing never re-parses. Absent or all-blank yields [].
+ */
+function parseInstanceTags(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((t) => t.trim().toLowerCase())
+    .filter((t) => t.length > 0);
 }
 
 /**
  * Parse env into a list of webhook instance configs. Pure function —
- * no validation beyond regex shape and value presence.
+ * no validation beyond regex shape and value presence. Tags come from the
+ * sibling WEBHOOK_<NAME>_TAGS env, keyed off the same raw <NAME> token.
  */
 export function findWebhookInstanceEnvs(
   env: NodeJS.ProcessEnv,
@@ -42,7 +70,8 @@ export function findWebhookInstanceEnvs(
     if (!m) return;
     if (!value || value.length === 0) return;
     const name = m[1].toLowerCase().replace(/_/g, '-');
-    out.push({ name, envKey: key, url: value });
+    const tags = parseInstanceTags(env[`WEBHOOK_${m[1]}_TAGS`]);
+    out.push({ name, envKey: key, url: value, tags });
   });
   return out;
 }
@@ -79,13 +108,26 @@ export function buildWebhookProviders(
         `Webhook registry: invalid URL in ${cfg.envKey}: "${cfg.url}"`,
       );
     }
+    if (cfg.tags.includes(RESERVED_TAG)) {
+      throw new Error(
+        `Webhook registry: instance "${cfg.name}" is tagged "${RESERVED_TAG}" (${cfg.envKey.replace(/_URL$/, '_TAGS')}) — "${RESERVED_TAG}" is a reserved routing token and cannot be a tag`,
+      );
+    }
     seen.add(cfg.name);
     const client = new WebhookClient(cfg.url, options.timeoutMs);
     providers.push(
-      new WebhookProvider(cfg.name, client, options.ownershipLabel, logger),
+      new WebhookProvider(
+        cfg.name,
+        client,
+        options.ownershipLabel,
+        logger,
+        cfg.tags,
+      ),
     );
     logger.log(
-      `Webhook registry: registered "${cfg.name}" from ${cfg.envKey} → ${cfg.url}`,
+      `Webhook registry: registered "${cfg.name}" from ${cfg.envKey} → ${cfg.url}${
+        cfg.tags.length > 0 ? ` tags=[${cfg.tags.join(', ')}]` : ''
+      }`,
     );
   });
   return providers;

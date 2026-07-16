@@ -13,6 +13,14 @@ export interface IDnsProvider {
    */
   readonly providerKey: string;
 
+  /**
+   * Routing tags declared for this provider (via WEBHOOK_<NAME>_TAGS). A
+   * `tags: [...]` label entry targets every provider carrying one of these.
+   * Optional: providers with no tags omit it — the selector treats absence
+   * as an empty tag set.
+   */
+  readonly tags?: string[];
+
   /** Returns true if all required env vars for this provider are set. */
   isConfigured(): boolean;
 

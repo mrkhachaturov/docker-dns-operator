@@ -26,8 +26,35 @@ describe('findWebhookInstanceEnvs', () => {
       WEBHOOK_CF_URL: 'http://ddo-cf:9090',
     });
     expect(out).toEqual([
-      { name: 'cf', envKey: 'WEBHOOK_CF_URL', url: 'http://ddo-cf:9090' },
+      {
+        name: 'cf',
+        envKey: 'WEBHOOK_CF_URL',
+        url: 'http://ddo-cf:9090',
+        tags: [],
+      },
     ]);
+  });
+
+  it('parses sibling WEBHOOK_<NAME>_TAGS (comma-separated, trimmed, lower-cased)', () => {
+    const out = findWebhookInstanceEnvs({
+      WEBHOOK_CF_MAIN_URL: 'http://ddo-cf:9090',
+      WEBHOOK_CF_MAIN_TAGS: 'Cloudflare, public ,,PUBLIC',
+    });
+    expect(out).toEqual([
+      {
+        name: 'cf-main',
+        envKey: 'WEBHOOK_CF_MAIN_URL',
+        url: 'http://ddo-cf:9090',
+        tags: ['cloudflare', 'public', 'public'],
+      },
+    ]);
+  });
+
+  it('leaves tags empty when the sibling _TAGS env is absent', () => {
+    const out = findWebhookInstanceEnvs({
+      WEBHOOK_CF_URL: 'http://ddo-cf:9090',
+    });
+    expect(out[0].tags).toEqual([]);
   });
 
   it('lower-cases the name and converts underscores to hyphens', () => {
@@ -88,6 +115,31 @@ describe('buildWebhookProviders', () => {
       logger,
     );
     expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('"cf"'));
+  });
+
+  it('passes normalized tags through to the WebhookProvider', () => {
+    const [provider] = buildWebhookProviders(
+      {
+        WEBHOOK_CF_MAIN_URL: 'http://ddo-cf:9090',
+        WEBHOOK_CF_MAIN_TAGS: 'cloudflare, public',
+      },
+      opts,
+      stubLogger(),
+    );
+    expect(provider.tags).toEqual(['cloudflare', 'public']);
+  });
+
+  it('rejects a provider tagged with the reserved "all" token at boot', () => {
+    expect(() =>
+      buildWebhookProviders(
+        {
+          WEBHOOK_CF_URL: 'http://ddo-cf:9090',
+          WEBHOOK_CF_TAGS: 'public,all',
+        },
+        opts,
+        stubLogger(),
+      ),
+    ).toThrow(/reserved routing token/);
   });
 
   it('throws on an invalid URL', () => {

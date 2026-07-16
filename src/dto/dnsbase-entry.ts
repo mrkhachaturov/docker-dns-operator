@@ -42,6 +42,17 @@ export abstract class DnsbaseEntry {
   providers?: string[];
 
   /**
+   * Normalized routing tags this entry targets. Each tag expands to every
+   * provider declared with it via WEBHOOK_<NAME>_TAGS, unioned with
+   * `providers`. Absent when the label omits `tags`. Set by DockerService
+   * during label parsing.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  tags?: string[];
+
+  /**
    * Provider-specific options extracted from the Docker label.
    * Example: { cf: { proxy: true } } for CloudFlare proxy on A/CNAME records.
    */

@@ -35,6 +35,7 @@ Apply to every entry regardless of `type`.
 | `type`            | string             | yes      | —        | One of `A`, `AAAA`, `CNAME`, `MX`, `NS`. `Unsupported` is reserved and skipped with a warning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `name`            | string (FQDN)      | yes      | —        | Fully-qualified record name. Validated with `class-validator`'s `@IsFQDN({ allow_wildcard: true })`, so a leading `*.` wildcard (e.g. `*.dev.example.com`) is accepted for any record type — mirroring external-dns, which treats `*.` as an ordinary owner name and leaves per-type/zone-cut handling to the DNS server. **Whether a wildcard actually lands depends on the target provider/zone:** MikroTik creates it as a `regexp` row (works); Cloudflare supports `*.` natively; **Windows AD DNS refuses wildcards via RFC 2136 dynamic update** (create it manually in AD, delegate the subzone, or route the wildcard to MikroTik). |
 | `providers`       | string \| string[] | no       | `["cf"]` | Provider keys this entry targets — e.g. `["cf"]`, `["mikrotik"]`, `["cf", "mikrotik-home"]`, or the shorthand `"all"`. Strings are lowercased and trimmed; `_` in env-derived keys becomes `-`. A typo here fails the entry loudly — no silent fallback.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `tags`            | string \| string[] | no       | —        | Routing tags. Each tag expands to **every** provider declared with it via `WEBHOOK_<NAME>_TAGS`, unioned with `providers`. Lets one entry target a whole group (all CloudFlare accounts, all Technitium boxes) without listing each key. Lowercased and trimmed. A tag matching no provider fails the entry loudly — never a silent no-op. See the `tags` normalization rules below.                                                                                                                                                                                                                                                         |
 | `provider`        | string             | no       | —        | Legacy singular form. Accepted and normalized into `providers`. `providers` wins if both are present.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `providerOptions` | object             | no       | —        | Per-provider options keyed by provider id. See below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `id`              | —                  | —        | —        | **Forbidden.** Present-but-not-empty `id` warns and skips the entry — it's reserved for the operator's internal bookkeeping.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -51,6 +52,19 @@ Implemented in [src/docker/label-normalizer.ts:11](src/docker/label-normalizer.t
 - Strings are `.trim().toLowerCase()`. Comparison against the registry uses
   the same normalization, so `"CF"`, `"cf"`, and `" cf "` all match key `cf`.
 - `"all"` is a fan-out shorthand: every registered provider sees the entry.
+
+### `tags` — routing by provider group
+
+Implemented in [src/providers/provider-selector.ts](src/providers/provider-selector.ts), fed by tags declared on each provider via `WEBHOOK_<NAME>_TAGS` (comma-separated) on the operator.
+
+Where `providers` names individual keys, `tags` names **groups**. Each tag resolves to every provider carrying it, and the result is unioned with any explicit `providers`. This is the answer to "publish to all my CloudFlare accounts" or "all my Technitium servers" without listing each key — and, because the tag lives on the provider, a newly-added provider carrying that tag joins the group automatically with no label change.
+
+- Declared on the operator: `WEBHOOK_CF_MAIN_URL=...` + `WEBHOOK_CF_MAIN_TAGS=cloudflare,public`. Tags are comma-separated, trimmed, lower-cased.
+- In the label: `"tags": "cloudflare"` or `"tags": ["cloudflare", "public"]`. Same string/array shape as `providers`.
+- **Absent vs empty:** omitting `tags` is fine. Unlike `providers`, `tags` has no backward-compat default — a tags-only entry (no `providers` field) routes to exactly the tagged providers and does **not** fall back to `cf`.
+- **Union with `providers`:** `"providers": ["cf-main"], "tags": ["internal"]` targets `cf-main` plus every provider tagged `internal`. A provider reached by both a key and a tag is written once.
+- **Strict, like `providers`:** a tag matching no registered provider fails the entry loudly with a per-entry ERROR and skips it for the cycle. "Resolved to zero providers" is always an error, never a silent no-op. Empty string, empty array, or a non-string element is malformed and skips the entry with a warning.
+- **Reserved word:** `all` cannot be a provider tag — the operator refuses to boot if `WEBHOOK_<NAME>_TAGS` contains it, since `all` is the `providers` fan-out token and a `tags: ["all"]` would otherwise look meaningful.
 
 ### `providerOptions`
 
@@ -187,6 +201,37 @@ Cloudflare copy too:
     "name": "wiki.example.com",
     "target": "app.example.com",
     "providers": ["cf", "mikrotik-home", "mikrotik-office"]
+  }
+]
+```
+
+One record to a whole provider group by tag (all three Technitium servers,
+each declared with `WEBHOOK_TECH_*_TAGS=technitium`), without naming a single
+key — add a fourth Technitium tagged `technitium` later and it joins with no
+label change:
+
+```json
+[
+  {
+    "type": "A",
+    "name": "app.example.com",
+    "address": "192.0.2.10",
+    "tags": ["technitium"]
+  }
+]
+```
+
+Union of an explicit key and a tag — publish into one specific CloudFlare
+account **and** every internal resolver tagged `internal` at once:
+
+```json
+[
+  {
+    "type": "A",
+    "name": "vpn.example.com",
+    "address": "203.0.113.9",
+    "providers": ["cf-main"],
+    "tags": ["internal"]
   }
 ]
 ```

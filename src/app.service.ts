@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { isNumber } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { ProviderRegistry } from './providers/provider-registry.service';
+import { ProviderSelector } from './providers/provider-selector';
 import { DockerService } from './docker/docker.service';
 import { computeSetDifference } from './app.functions';
 import { DnsbaseEntry } from './dto/dnsbase-entry';
@@ -236,22 +237,44 @@ export class AppService implements OnModuleDestroy {
     } else if (this.ddnsService.getState() === CronState.Started)
       this.ddnsService.stop();
 
-    // Strict per-entry provider validation. An entry with any unknown
-    // provider name in its `providers: [...]` list (other than the special
-    // `"all"` token) is rejected loudly with a per-entry ERROR log and
-    // skipped for the rest of this cycle. Other entries reconcile as
-    // normal. We never silently fall back or guess what a typo meant —
-    // see docs/sidecar-architecture.md "Naming and registration".
-    const knownKeys = new Set(
-      this.providerRegistry.getAll().map((p) => p.providerKey),
-    );
-    const knownKeysList = [...knownKeys].sort().join(', ') || '(none)';
+    // Strict per-entry routing. Each entry's `providers` + `tags` fields are
+    // resolved to a concrete set of provider keys by a ProviderSelector built
+    // once for this pass (see src/providers/provider-selector.ts). An entry
+    // that references any unknown provider key OR any tag matching no provider
+    // is rejected loudly with a per-entry ERROR and skipped for the rest of
+    // this cycle — including a tag that resolves to nothing, so "matched no
+    // provider" is never a silent no-op. Other entries reconcile as normal.
+    // We never fall back or guess what a typo meant. The resolved key set is
+    // cached here so the per-provider loop below is a plain membership test.
+    const registered = this.providerRegistry
+      .getAll()
+      .map((p) => ({ providerKey: p.providerKey, tags: p.tags ?? [] }));
+    const selector = new ProviderSelector(registered);
+    const knownKeysList =
+      registered
+        .map((p) => p.providerKey)
+        .sort()
+        .join(', ') || '(none)';
+    const targetsByEntry = new Map<DnsbaseEntry, Set<string>>();
     const reconcilableEntries = allDockerEntries.filter((entry) => {
-      const refs = entry.providers ?? ['cf'];
-      const unknown = refs.filter((r) => r !== 'all' && !knownKeys.has(r));
-      if (unknown.length === 0) return true;
+      const { keys, unknownProviders, unknownTags } = selector.resolve(
+        entry.providers,
+        entry.tags,
+      );
+      if (unknownProviders.length === 0 && unknownTags.length === 0) {
+        targetsByEntry.set(entry, keys);
+        return true;
+      }
+      const unknownParts = [
+        unknownProviders.length > 0
+          ? `provider(s) [${unknownProviders.join(', ')}]`
+          : '',
+        unknownTags.length > 0 ? `tag(s) [${unknownTags.join(', ')}]` : '',
+      ]
+        .filter(Boolean)
+        .join(' and ');
       this.loggerService.error(
-        `AppService: entry ${entry.Key} (${entry.type} ${entry.name}) references unknown provider(s) [${unknown.join(', ')}]; configured providers: [${knownKeysList}]. Entry skipped.`,
+        `AppService: entry ${entry.Key} (${entry.type} ${entry.name}) references unknown ${unknownParts}; configured providers: [${knownKeysList}]. Entry skipped.`,
       );
       return false;
     });
@@ -262,11 +285,11 @@ export class AppService implements OnModuleDestroy {
       // eslint-disable-next-line no-await-in-loop
       if (provider.prepareForJob) await provider.prepareForJob();
 
-      // Filter entries targeting this provider
-      const targeted = reconcilableEntries.filter(
-        (e) =>
-          (e.providers ?? ['cf']).includes(provider.providerKey) ||
-          (e.providers ?? ['cf']).includes('all'),
+      // Filter entries targeting this provider — a plain membership test
+      // against the key set the selector resolved above (providers ∪ tags,
+      // with 'all' and the backward-compat 'cf' default already expanded).
+      const targeted = reconcilableEntries.filter((e) =>
+        targetsByEntry.get(e)?.has(provider.providerKey),
       );
 
       // Domain pre-routing: drop entries whose name falls outside this
