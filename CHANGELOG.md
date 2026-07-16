@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-16
+
+### Added
+
+- **Tag-based provider routing (`tags` label field + `WEBHOOK_<NAME>_TAGS`).** A label entry may now carry a `tags` field so one record targets a whole **group** of provider instances — every CloudFlare account, every Technitium box — without listing each key or resorting to the blunt `"all"`. Providers declare their tags on the operator via the sibling `WEBHOOK_<NAME>_TAGS` env (comma-separated); each tag in a label resolves to every provider carrying it, unioned with any explicit `providers`. Because the tag lives on the provider, a newly-added instance carrying the tag joins the group with no label change. Strict routing extends to tags: an unknown key **or** a tag matching no provider fails that entry loudly and skips it — "resolved to zero providers" is always an error, never a silent no-op. `all` is reserved and cannot be a provider tag (the operator refuses to boot). Tags are an operator-side routing concern only — they never cross the wire, so the external-dns webhook v1 contract is unchanged. See [LABELS.md](LABELS.md).
+
 ## [0.2.0] — 2026-06-07
 
 ### Added
